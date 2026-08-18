@@ -1,17 +1,13 @@
 """Vercel Serverless 入口 — 将 Flask app 包装为 ASGI/WSGI 处理器。
 
-Vercel Python Runtime 通过 ``vercel.json`` 指向本文件。Vercel 的 Serverless
-环境是无状态/无持久盘的：SPICE 内核随仓库分发可用，但 3.2 GB 的 DEM 无法
-打包 → DEM 相关端点（/api/dem_tile、/api/horizon_mask、/api/terrain_gltf）
-会返回 503。天历类端点（/api/earth_daily、/api/relay_daily、/api/health 等）
-不依赖 DEM，可正常工作。
+Vercel Python Runtime 通过 ``vercel.json`` 指向本文件。DEM 使用仓库内置的
+压缩子集（``ldem_87s_5mpp_shackleton_50km_25m.tif``，52 MB，随仓库分发），
+无需持久盘，所有端点（含 DEM 类：/api/dem_tile、/api/horizon_mask、
+/api/terrain_gltf）均可直接工作。
 
 访问统计（/api/visit、/api/click、/api/stats）可工作，但 CSV 写入实例的
 临时文件系统，实例回收后数据丢失；如需持久统计，请接入外部存储
 （Vercel Blob / KV / Postgres）改写 server.py 的 _append_csv/_read_csv。
-
-若要在 Vercel 上完整运行（含 DEM），需把 DEM 上传到对象存储
-（如 Vercel Blob / S3），并在启动时下载到临时目录后设置 DEM_PATH。
 """
 
 import os

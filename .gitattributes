@@ -1,0 +1,2 @@
+# 仓库内置 DEM 子集（52 MB，随仓库分发）——普通 git 跟踪，不使用 LFS
+ldem_87s_5mpp_shackleton_50km_25m.tif -filter -diff -merge

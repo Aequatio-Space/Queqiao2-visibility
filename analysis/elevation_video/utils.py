@@ -42,9 +42,12 @@ SPICE_KERNELS: tuple[str, ...] = tuple(
     for rel in _SPICE_KERNEL_REL
 )
 
-# DEM 路径：必须通过环境变量 DEM_PATH 提供（本地路径因人而异，不硬编码）。
-# 未设置时为空字符串，DEM 相关端点/分析会明确报错提示（见 viewer/server.py 的 503 分支）。
-DEM_PATH: str = os.environ.get("DEM_PATH", "")
+# DEM 路径：默认使用仓库内置的压缩子集（50 km 半径、25 m/px，52 MB，随仓库分发，
+# 无需持久盘）。可通过环境变量 DEM_PATH 覆盖为其他 DEM（如完整 3.2 GB 版本）。
+# 未设置且内置文件缺失时为空字符串，DEM 相关端点/分析会明确报错提示
+# （见 viewer/server.py 的 503 分支）。
+_DEFAULT_DEM = os.path.join(_REPO_ROOT, "ldem_87s_5mpp_shackleton_50km_25m.tif")
+DEM_PATH: str = os.environ.get("DEM_PATH", _DEFAULT_DEM)
 
 # MJD 参考历元（1858-11-17 00:00 UTC）
 _MJD_EPOCH = datetime(1858, 11, 17, tzinfo=timezone.utc)

@@ -5,8 +5,10 @@ DEM 光照地形图（实时太阳光照渲染），右侧为极坐标地平线�
 天空视角，底部时间滑块联动展示地球与鹊桥二号（Queqiao-2）中继卫星的全天
 可见性窗口。
 
-数据由服务端实时计算（SPICE 天历 + 3.2 GB 月球 DEM `ldem_87s_5mpp.tif`），
-前端全部基于 Canvas/WebGL 客户端渲染。
+数据由服务端实时计算（SPICE 天历 + 月球 DEM），前端全部基于 Canvas/WebGL
+客户端渲染。DEM 使用仓库内置的**压缩子集** `ldem_87s_5mpp_shackleton_50km_25m.tif`
+（沙克尔顿坑 50 km 半径、25 m/px、52 MB，随仓库分发，**无需持久盘**）；
+如需更高精度可自行用完整 DEM（3.2 GB）覆盖 `DEM_PATH`。
 
 ## 目录结构
 
@@ -33,13 +35,14 @@ requirements.txt            # Python 依赖
 
 ## 本地运行
 
-要求 Python 3.10+（推荐 conda/mamba 环境），DEM 文件存在。
+要求 Python 3.10+（推荐 conda/mamba 环境）。DEM 使用仓库内置的压缩子集
+`ldem_87s_5mpp_shackleton_50km_25m.tif`（随仓库分发），**无需额外下载或持久盘**。
 
 ```bash
 # 1. 安装依赖
 pip install -r requirements.txt
 
-# 2. 启动（开发服务器）
+# 2. 启动（开发服务器，默认即用内置 DEM）
 python viewer/server.py
 # 或指定 DEM 路径 / 端口
 DEM_PATH=/path/to/ldem_87s_5mpp.tif PORT=5050 python viewer/server.py
@@ -62,7 +65,7 @@ waitress-serve --host 0.0.0.0 --port $PORT viewer.server:app
 
 | 变量 | 默认值 | 说明                                          |
 | --- | --- |-----------------------------------------------|
-| `DEM_PATH` | 无（必填） | DEM GeoTIFF 路径（未设置时 DEM 端点返回 503） |
+| `DEM_PATH` | 仓库内置 `ldem_87s_5mpp_shackleton_50km_25m.tif` | DEM GeoTIFF 路径（默认随仓库分发，无需设置；可覆盖为其他 DEM） |
 | `SPICE_KERNEL_DIR` | 仓库根 | SPICE 内核目录（含 `core/environment/data/`） |
 | `PORT` / `VIEWER_PORT` | `5000` | 监听端口                                      |
 | `HOST` | `0.0.0.0` | 监听地址                                      |
@@ -71,15 +74,13 @@ waitress-serve --host 0.0.0.0 --port $PORT viewer.server:app
 
 ## 部署到 Render
 
-Render 有**持久盘**，可承载 3.2 GB 的 DEM，推荐在 Render 上完整部署。
+DEM 使用仓库内置的压缩子集（52 MB，随仓库分发），**无需持久盘**，可直接部署。
 
 方式一：使用 Blueprint（推荐）
 
 1. 把本仓库推送到 GitHub；
 2. Render Dashboard → New → Blueprint → 选择本仓库；
-3. 自动按 `render.yaml` 创建 Web Service + 4 GB Disk；
-4. 将 DEM 上传到持久盘挂载点（如 `/opt/data/ldem_87s_5mpp.tif`），
-   并在 Service 的 Environment 里设置 `DEM_PATH=/opt/data/ldem_87s_5mpp.tif`。
+3. 自动按 `render.yaml` 创建 Web Service（内置 DEM 开箱即用）。
 
 方式二：手动创建 Web Service
 
@@ -87,24 +88,25 @@ Render 有**持久盘**，可承载 3.2 GB 的 DEM，推荐在 Render 上完整�
 - Environment：`Python 3`
 - Build Command：`pip install -r requirements.txt`
 - Start Command：`gunicorn viewer.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 300`
-- 挂载 Disk（≥4 GB），上传 DEM，设置 `DEM_PATH`。
+
+> 如需更高精度 DEM，可挂载 Disk 上传完整 DEM（3.2 GB）并设置
+> `DEM_PATH=/opt/data/ldem_87s_5mpp.tif`；访问统计如需持久化，
+> 设置 `VIEWER_STATS_DIR=/opt/data/stats` 并挂载 Disk。
 
 健康检查：`GET /api/health` 返回 `{"status": "ok", "dem_exists": true, ...}`。
 
 ## 部署到 Vercel
 
-Vercel 的 Serverless 环境**无持久盘**，3.2 GB 的 DEM 无法随代码包部署。
-天历类端点（地球/鹊桥日序列、健康检查）不依赖 DEM，可直接工作；DEM 类
-端点（地形瓦片、地平线掩码、3D 地形）会返回 503。**访问统计 CSV 同样无法
-持久化**（Serverless 实例文件系统为临时性），统计端点会工作但数据会随
-实例回收丢失；如需持久统计，可接入外部存储（Vercel Blob / KV / Postgres）。
+DEM 使用仓库内置的压缩子集（52 MB，随仓库分发），**无需持久盘**，
+所有端点（含 DEM 类：地形瓦片、地平线掩码、3D 地形）均可直接工作。
 
 ```bash
 vercel --prod
 ```
 
-如需在 Vercel 上完整运行（含 DEM）：将 DEM 上传到 Vercel Blob / S3，
-在 `api/index.py` 启动时下载到临时目录并设置 `DEM_PATH`。
+> **访问统计 CSV 无法持久化**（Serverless 实例文件系统为临时性），统计端点
+> 会工作但数据会随实例回收丢失；如需持久统计，可接入外部存储
+> （Vercel Blob / KV / Postgres）。
 
 ## API 一览
 

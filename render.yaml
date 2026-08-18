@@ -3,11 +3,12 @@
 # 并指向本仓库根目录。
 #
 # 注意：
-# - DEM（ldem_87s_5mpp.tif，3.2 GB）无法随仓库分发。生产环境请挂载
-#   持久盘（Disk）到 /opt/data 并上传 DEM，然后设置环境变量
+# - DEM 使用仓库内置的压缩子集（ldem_87s_5mpp_shackleton_50km_25m.tif，
+#   52 MB，随仓库分发），无需持久盘，开箱即用。
+# - 如需更高精度 DEM（完整 3.2 GB 版本），可挂载 Disk 并设置
 #   DEM_PATH=/opt/data/ldem_87s_5mpp.tif。
-# - 访问统计 CSV 同样写入持久盘：VIEWER_STATS_DIR=/opt/data/stats
-#   （否则 Render 重启后统计丢失）。
+# - 访问统计 CSV 默认写入实例临时文件系统（重启丢失）；如需持久化，
+#   挂载 Disk 并设置 VIEWER_STATS_DIR=/opt/data/stats。
 # - SPICE 内核已随仓库提交（core/environment/data/），默认路径即可。
 services:
   - type: web
@@ -17,13 +18,5 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn viewer.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 300
     envVars:
-      - key: DEM_PATH
-        sync: false # 在 Dashboard 中手动设置（指向持久盘上的 DEM）
-      - key: VIEWER_STATS_DIR
-        value: /opt/data/stats
       - key: PORT
         value: 8000
-    disk:
-      name: dem-data
-      mountPath: /opt/data
-      sizeGB: 4

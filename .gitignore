@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 运行产物
+logs/
+*.png
+*.mp4
+*.gltf
+
+# 访问统计 CSV（运行时生成；部署时通过 VIEWER_STATS_DIR 指向持久盘）
+viewer/stats/
+
+# DEM：仓库内置压缩子集（ldem_87s_5mpp_shackleton_50km_25m.tif，52 MB）
+# 随仓库分发，无需持久盘。其他大型 DEM（如完整 3.2 GB 版本）不随仓库分发，
+# 通过环境变量 DEM_PATH 指向外部存储。
+*.tif
+*.tiff
+!ldem_87s_5mpp_shackleton_50km_25m.tif
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+
+# 部署平台本地文件
+.vercel/
