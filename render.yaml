@@ -1,0 +1,29 @@
+# Render Blueprint — 交互式地平线掩码可视化工具
+# 用法：在 Render Dashboard 用 "Blueprint" 创建，或手动新建 Web Service
+# 并指向本仓库根目录。
+#
+# 注意：
+# - DEM（ldem_87s_5mpp.tif，3.2 GB）无法随仓库分发。生产环境请挂载
+#   持久盘（Disk）到 /opt/data 并上传 DEM，然后设置环境变量
+#   DEM_PATH=/opt/data/ldem_87s_5mpp.tif。
+# - 访问统计 CSV 同样写入持久盘：VIEWER_STATS_DIR=/opt/data/stats
+#   （否则 Render 重启后统计丢失）。
+# - SPICE 内核已随仓库提交（core/environment/data/），默认路径即可。
+services:
+  - type: web
+    name: queqiao2-visibility
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn viewer.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 300
+    envVars:
+      - key: DEM_PATH
+        sync: false # 在 Dashboard 中手动设置（指向持久盘上的 DEM）
+      - key: VIEWER_STATS_DIR
+        value: /opt/data/stats
+      - key: PORT
+        value: 8000
+    disk:
+      name: dem-data
+      mountPath: /opt/data
+      sizeGB: 4
