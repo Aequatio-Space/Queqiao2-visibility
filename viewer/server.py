@@ -2,7 +2,10 @@
 """交互式地平线掩码可视化工具 — Flask 后端。
 
 端点一览：
-- ``GET /``                         → 渲染前端 index.html
+- ``GET /``                         → 站点首页（三入口导航）
+- ``GET /visibility``               → 地平线掩码可视化前端（原 ``/``）
+- ``GET /orbits``                   → 杨维廉论文轨道 3D 可视化前端
+- ``GET /coast_tool/``              → 月球发射窗口计算器（停泊轨道滑行方案）
 - ``GET /api/dem_tile``             → DEM 瓦片 PNG（20 km × 20 km 裁剪，附元数据头）
 - ``GET /api/horizon_mask``         → 360° 地形遮挡角数组（lru_cache 缓存）
 - ``GET /api/earth_elevation``      → 单时刻地球高度角 + 方位角
@@ -10,6 +13,8 @@
 - ``GET /api/relay_elevation``      → 单时刻中继卫星高度角 + 方位角
 - ``GET /api/relay_daily``          → 一天 288 点中继卫星高度角/方位角日序列
 - ``GET /api/stereo_to_lonlat``     → 极射投影 (x, y) → 经纬度
+- ``GET /api/yang_orbits``          → Yang 论文 24 条转移轨道 XYZ JSON（预生成资产）
+- ``GET /api/yang_orbits_stream``   → 同上，SSE 逐轨道推送（meta/orbit/done）
 - ``POST /api/visit``               → 记录一次页面访问（CSV 持久化）
 - ``POST /api/click``               → 记录一次按钮点击（CSV 持久化）
 - ``GET /api/stats``                → 按日期聚合的访问量 + 按钮点击量
@@ -37,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import os
 import sys
@@ -58,7 +64,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.colors as mcolors  # noqa: E402
 import rasterio  # noqa: E402
-from flask import Flask, jsonify, render_template, request, send_file  # noqa: E402
+from flask import (  # noqa: E402
+    Flask,
+    Response,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    stream_with_context,
+)
 from werkzeug.exceptions import BadRequest, HTTPException  # noqa: E402
 from rasterio.enums import Resampling  # noqa: E402
 from rasterio.windows import from_bounds  # noqa: E402
@@ -78,6 +93,15 @@ DEFAULT_LON_DEG = u.SHACKLETON_LON_DEG  # 129.78
 SHACKLETON_LAT_DEG = u.SHACKLETON_LAT_DEG  # -89.67
 SHACKLETON_LON_DEG = u.SHACKLETON_LON_DEG  # 129.78
 DEFAULT_DATE = "2026-08-15"
+
+# 多入口站点资产路径
+# - coast_tool：月球发射窗口计算器（纯静态，脚本已外置以符合 CSP）
+# - yang_orbits：Yang 论文 24 条转移轨道 XYZ JSON（scripts/build_yang_orbits.py
+#   预生成；不在请求内实时求解，避免单线程服务被 ~20 s 慢计算拖垮。
+#   存放于 viewer/data/ 而非 static/，强制经 API 读取，保持单一入口）
+COAST_TOOL_DIR = os.path.join(_REPO_ROOT, "coast_tool")
+YANG_ORBITS_JSON = os.path.join(BASE_DIR, "data", "yang_orbits_xyz.json")
+YANG_ORBITS_DEFAULT_T_ARRIVE = "2026-08-24T00:00:00Z"
 
 # 极射投影 → 经纬度使用月球赤道半径（与 utils.lonlat_to_polar_stereo_xy 一致）
 MOON_R_M = u.MOON_R_EQ_M
@@ -354,20 +378,24 @@ class _RateLimiter:
 _rate_limiter = _RateLimiter()
 
 
-def _rate_limit(limit: int, window_sec: float = 60.0):
+def _rate_limit(limit: int, window_sec: float = 60.0, scope: str | None = None):
     """装饰器：按客户端 IP 限流，超限返回 429 JSON。
 
     :param limit: 窗口内允许的最大请求数。
     :param window_sec: 滑动窗口长度（秒，默认 60）。
+    :param scope: 限流桶作用域（默认取被装饰函数名）。不同端点使用独立
+        计数桶，避免高频端点（如 /api/stats 60/min）挤占其他端点的配额。
     """
 
     def decorator(func):
         from functools import wraps
 
+        bucket = scope or func.__name__
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             ip = _client_ip()
-            if not _rate_limiter.allow(ip, limit, window_sec):
+            if not _rate_limiter.allow(f"{bucket}:{ip}", limit, window_sec):
                 resp = jsonify({"error": "请求过于频繁，请稍后再试"})
                 resp.status_code = 429
                 resp.headers["Retry-After"] = str(int(window_sec))
@@ -948,11 +976,188 @@ def cached_terrain_gltf(lat_deg: float, lon_deg: float) -> tuple[bytes, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Yang 论文轨道资产（预生成 JSON，只读；不暴露文件系统路径）
+# ---------------------------------------------------------------------------
+def _json_safe(value):
+    """递归把非有限浮点（NaN/±Inf）转为 None，保证输出为严格 JSON。
+
+    ``OrbitRecord.to_jsonable()`` 在求解失败（``error`` 记录）时会写入
+    ``NaN``；Python ``json`` 默认允许输出裸 ``NaN``（非标准 JSON），
+    严格解析器（如浏览器 ``JSON.parse``）会报错，故在服务端统一净化。
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@lru_cache(maxsize=1)
+def _yang_orbits_data() -> dict | None:
+    """读取并缓存轨道 JSON 资产；缺失/损坏时返回 None（端点返回 503）。"""
+    if not os.path.isfile(YANG_ORBITS_JSON):
+        return None
+    try:
+        with open(YANG_ORBITS_JSON, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("orbits"), list):
+        return None
+    return _json_safe(payload)
+
+
+@lru_cache(maxsize=1)
+def _yang_orbits_json_bytes() -> bytes | None:
+    """缓存序列化后的轨道 JSON（严格模式，拒绝 NaN/Inf）。"""
+    data = _yang_orbits_data()
+    if data is None:
+        return None
+    return json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _parse_t_arrive() -> str:
+    """解析并严格校验 ``t_arrive`` 查询参数（UTC ISO-8601）。
+
+    仅接受 ``YYYY-MM-DD`` 或 ``YYYY-MM-DDTHH:MM:SSZ``，且年份须落在
+    SPICE 内核（de442s.bsp）覆盖的 1900–2050；非法输入抛 BadRequest（400），
+    不把用户字符串直接传给 SPICE。
+    """
+    raw = request.args.get("t_arrive")
+    if raw is None:
+        return YANG_ORBITS_DEFAULT_T_ARRIVE
+    s = raw.strip()
+    if not s or len(s) > 32:
+        raise BadRequest("t_arrive 必须为 UTC ISO-8601 时间字符串")
+    try:
+        if "T" in s:
+            dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+        else:
+            dt = datetime.strptime(s, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise BadRequest("t_arrive 必须为 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SSZ（UTC）")
+    if not (1900 <= dt.year <= 2050):
+        raise BadRequest("t_arrive 必须在 1900–2050 年（SPICE 内核覆盖范围）")
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _yang_orbits_meta(data: dict) -> dict:
+    """轨道资产元信息（供 SSE meta 事件与前端状态栏使用）。"""
+    return {
+        "t_arrive_utc": data.get("t_arrive_utc"),
+        "h_p_km": data.get("h_p_km"),
+        "H_m_km": data.get("H_m_km"),
+        "n_samples_per_orbit": data.get("n_samples_per_orbit"),
+        "moon_model": data.get("moon_model"),
+        "n_orbits_expected": len(data["orbits"]),
+    }
+
+
+# ---------------------------------------------------------------------------
 # 页面
 # ---------------------------------------------------------------------------
 @app.route("/")
+def landing() -> str:
+    """站点首页：三个功能区入口（可见性 / 轨道可视化 / 发射窗口）。"""
+    return render_template("landing.html")
+
+
+@app.route("/visibility")
 def index() -> str:
     return render_template("index.html")
+
+
+@app.route("/orbits")
+def orbits_page() -> str:
+    return render_template("orbits.html")
+
+
+# ---------------------------------------------------------------------------
+# coast_tool 静态子应用（send_from_directory 自带路径穿越防护）
+# ---------------------------------------------------------------------------
+@app.route("/coast_tool/")
+def coast_tool_index():
+    if not os.path.isfile(os.path.join(COAST_TOOL_DIR, "index.html")):
+        return jsonify({"error": "coast_tool 资产缺失"}), 503
+    return send_from_directory(COAST_TOOL_DIR, "index.html")
+
+
+@app.route("/coast_tool/<path:filename>")
+def coast_tool_asset(filename: str):
+    """coast_tool 静态资源（vendor/assets/app.js）；非法路径返回 404。"""
+    return send_from_directory(COAST_TOOL_DIR, filename)
+
+
+# ---------------------------------------------------------------------------
+# API: Yang 论文轨道（预生成资产，只读）
+# ---------------------------------------------------------------------------
+@app.route("/api/yang_orbits")
+@_rate_limit(30, 60.0)  # 每 IP 每分钟最多 30 次
+def yang_orbits():
+    """Yang 论文 24 条转移轨道 XYZ JSON（``t_arrive`` 仅支持论文默认历元）。"""
+    t_arrive = _parse_t_arrive()
+    data = _yang_orbits_data()
+    if data is None:
+        return jsonify({"error": "轨道数据资产不可用"}), 503
+    if t_arrive != data.get("t_arrive_utc"):
+        return (
+            jsonify(
+                {
+                    "error": "当前部署仅提供论文默认到达历元 "
+                    f"{data.get('t_arrive_utc')}（可用 scripts/build_yang_orbits.py 重新生成）"
+                }
+            ),
+            400,
+        )
+    body = _yang_orbits_json_bytes()
+    if body is None:  # pragma: no cover - 竞态兜底
+        return jsonify({"error": "轨道数据资产不可用"}), 503
+    return send_file(io.BytesIO(body), mimetype="application/json", max_age=3600)
+
+
+@app.route("/api/yang_orbits_stream")
+@_rate_limit(20, 60.0)  # SSE 连接较贵，限 20 次/分钟
+def yang_orbits_stream():
+    """SSE 逐轨道推送：``meta`` → 24 × ``orbit`` → ``done``。
+
+    与 ``/api/yang_orbits`` 同源同数据，仅按事件分片，便于前端边收边渲染
+    并展示进度。计算已离线完成，本端点不做重计算。
+    """
+    t_arrive = _parse_t_arrive()
+    data = _yang_orbits_data()
+    if data is None:
+        return jsonify({"error": "轨道数据资产不可用"}), 503
+    if t_arrive != data.get("t_arrive_utc"):
+        return (
+            jsonify(
+                {
+                    "error": "当前部署仅提供论文默认到达历元 "
+                    f"{data.get('t_arrive_utc')}"
+                }
+            ),
+            400,
+        )
+
+    meta = _yang_orbits_meta(data)
+    orbits = data["orbits"]
+
+    def generate():
+        yield "event: meta\ndata: " + json.dumps(
+            meta, ensure_ascii=False, allow_nan=False
+        ) + "\n\n"
+        for rec in orbits:
+            yield "event: orbit\ndata: " + json.dumps(
+                rec, ensure_ascii=False, allow_nan=False
+            ) + "\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    # 反向代理（Render/nginx）禁用缓冲，保证事件即时到达前端
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -1211,6 +1416,8 @@ def health():
             "status": "ok",
             "dem_exists": dem_available(),  # 仅返回布尔值，不暴露 dem_path
             "spice_ready": _SPICE_READY,
+            "orbit_data": os.path.isfile(YANG_ORBITS_JSON),
+            "coast_tool": os.path.isfile(os.path.join(COAST_TOOL_DIR, "index.html")),
             "r_eq_m": round(float(R_EQ), 1),
             "r_pol_m": round(float(R_POL), 1),
         }

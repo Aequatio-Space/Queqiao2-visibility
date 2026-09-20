@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="鹊桥二号可见性 · 地月转移轨道可视化 · 月球发射窗口计算器 — 三合一交互式航天可视化站点">
+<title>月球探测可视化站 · 首页</title>
+<style>
+    :root {
+        --bg: #0c1117;
+        --panel: #18212b;
+        --panel-edge: #2a3744;
+        --text: #d7e1ea;
+        --text-dim: #8fa1b3;
+        --accent: #4aa8e0;
+        --accent-2: #5fbf85;
+        --accent-3: #d9a441;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+            radial-gradient(1200px 500px at 50% -10%, rgba(74, 168, 224, 0.14), transparent 60%),
+            var(--bg);
+        color: var(--text);
+        font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        display: flex;
+        flex-direction: column;
+    }
+
+    header {
+        max-width: 1100px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 56px 20px 8px;
+    }
+
+    header .eyebrow {
+        font-size: 12px;
+        letter-spacing: 2.5px;
+        color: var(--accent);
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+
+    header h1 {
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        margin: 0 0 12px;
+    }
+
+    header p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 14px;
+        line-height: 1.8;
+        max-width: 760px;
+    }
+
+    main {
+        flex: 1;
+        max-width: 1100px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 28px 20px 40px;
+    }
+
+    .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 18px;
+    }
+
+    a.card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border: 1px solid var(--panel-edge);
+        border-radius: 12px;
+        padding: 22px 20px 18px;
+        color: inherit;
+        text-decoration: none;
+        overflow: hidden;
+        transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+    }
+
+    a.card::before {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: var(--card-accent, var(--accent));
+        opacity: 0.85;
+    }
+
+    a.card:hover {
+        transform: translateY(-4px);
+        border-color: var(--card-accent, var(--accent));
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    }
+
+    .card .idx {
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 1.5px;
+        color: var(--card-accent, var(--accent));
+        margin-bottom: 12px;
+    }
+
+    .card h2 {
+        font-size: 18px;
+        margin: 0 0 10px;
+        font-weight: 600;
+    }
+
+    .card p {
+        margin: 0 0 16px;
+        font-size: 13px;
+        line-height: 1.75;
+        color: var(--text-dim);
+        flex: 1;
+    }
+
+    .card .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 16px;
+    }
+
+    .card .tag {
+        font-size: 11px;
+        color: var(--text-dim);
+        border: 1px solid var(--panel-edge);
+        border-radius: 10px;
+        padding: 2px 9px;
+        white-space: nowrap;
+    }
+
+    .card .go {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--card-accent, var(--accent));
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .card .go .arrow {
+        transition: transform .16s ease;
+    }
+
+    a.card:hover .go .arrow { transform: translateX(4px); }
+
+    footer {
+        max-width: 1100px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 0 20px 36px;
+        font-size: 12px;
+        color: var(--text-dim);
+        line-height: 1.9;
+    }
+
+    footer .sep {
+        height: 1px;
+        background: var(--panel-edge);
+        margin-bottom: 16px;
+    }
+
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 640px) {
+        header { padding-top: 36px; }
+        header h1 { font-size: 24px; }
+    }
+</style>
+</head>
+<body>
+
+<header>
+    <div class="eyebrow">Lunar Exploration Visualization</div>
+    <h1>月球探测可视化站</h1>
+    <p>
+        面向鹊桥二号中继任务与地月转移轨道设计的交互式可视化平台：
+        从月球南极的地平线可见性分析，到杨维廉论文转移轨道的三维展示，
+        再到经嫦娥五号/六号与鹊桥二号实测数据验证的发射窗口计算器。
+        全部计算与渲染均在浏览器端或本站服务端完成，无第三方 CDN 依赖。
+    </p>
+</header>
+
+<main>
+    <div class="cards">
+        <a class="card" href="/visibility" data-track="首页-可见性"
+           style="--card-accent: var(--accent);">
+            <div class="idx">01 / VISIBILITY</div>
+            <h2>轨道可见性分析</h2>
+            <p>
+                月球南极 Shackleton 坑底观测点：实时太阳光照 DEM 地形图、
+                360° 极坐标地平线掩码、第一人称 3D 天空视角，
+                以及地球与鹊桥二号中继卫星的全天可见性窗口联动展示。
+            </p>
+            <div class="tags">
+                <span class="tag">月球 DEM 光照</span>
+                <span class="tag">地平线掩码</span>
+                <span class="tag">鹊桥二号中继</span>
+                <span class="tag">SPICE 天历</span>
+            </div>
+            <div class="go">进入功能区 <span class="arrow">→</span></div>
+        </a>
+
+        <a class="card" href="/orbits" data-track="首页-轨道可视化"
+           style="--card-accent: var(--accent-2);">
+            <div class="idx">02 / ORBITS</div>
+            <h2>地月转移轨道可视化</h2>
+            <p>
+                杨维廉论文 24 条地月转移轨道（表 1–4：共面、非共面、同向发射、
+                极月卫星）在冻结 MEP 坐标系中的三维展示：逐条轨迹、
+                近地点/近月点地表标记、月球参考轨迹与多视角预设。
+            </p>
+            <div class="tags">
+                <span class="tag">R-1 边值求解</span>
+                <span class="tag">MEP 冻结坐标系</span>
+                <span class="tag">24 条论文轨道</span>
+                <span class="tag">three.js</span>
+            </div>
+            <div class="go">进入功能区 <span class="arrow">→</span></div>
+        </a>
+
+        <a class="card" href="/coast_tool/" data-track="首页-发射窗口"
+           style="--card-accent: var(--accent-3);">
+            <div class="idx">03 / LAUNCH WINDOW</div>
+            <h2>月球发射窗口计算器</h2>
+            <p>
+                停泊轨道滑行方案（固定射向走廊 → 约 200 km 停泊 → 滑行相位闭合
+                → TLI 入 LTO），含月球引力修正与极轨捕获约束。
+                几何反演结果与嫦娥五号/六号、鹊桥二号实测窗口一致。
+            </p>
+            <div class="tags">
+                <span class="tag">滑行 TLI</span>
+                <span class="tag">落区走廊</span>
+                <span class="tag">月球引力修正</span>
+                <span class="tag">任务验证</span>
+            </div>
+            <div class="go">进入功能区 <span class="arrow">→</span></div>
+        </a>
+    </div>
+</main>
+
+<footer>
+    <div class="sep"></div>
+    科学口径与数据来源：NASA LROC 月球 DEM、NASA JPL NAIF SPICE 内核、杨维廉论文
+    （地月转移轨道设计）、嫦娥五号/六号与鹊桥二号公开飞行数据。许可与致谢详见仓库
+    README 与 THIRD_PARTY_NOTICES.md。
+</footer>
+
+<script src="{{ url_for('static', filename='landing.js') }}"></script>
+</body>
+</html>
