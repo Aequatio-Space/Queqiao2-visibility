@@ -3,7 +3,8 @@
 Lunar Transfer Launch Window Calculator (parking-orbit coast TLI scheme)
 
 单页 Three.js 应用, 实现经嫦娥五号/六号、鹊桥二号实测数据验证的真实发射方案
-(验证过程见 `../study_notes.md` §11 与 `../verify_scenario.py`):
+(验证过程见原 lunarlaunchwindow 项目的 `study_notes.md` §11 与 `verify_scenario.py`,
+二者未随本仓库移植):
 
 **固定射向(落区约束走廊内) → ~200 km 停泊轨道 → 滑行至共面相位点 → TLI 点火入 LTO**
 
@@ -12,13 +13,13 @@ span{发射场@发射, 月球@到达}, 不要求与白道面重合。
 
 ## 背景
 
-项目第一代工具 (仓库根目录 `index.html`, 保留作参考) 假设转移轨道位于白道面内、
+原项目第一代工具 (`index.html`, 未移植, 保留于原仓库作参考) 假设转移轨道位于白道面内、
 发射窗口 = 发射场随地球自转穿越白道面的时刻 (升/降交点各一次), 并据此做了
 Hohmann 型转移、TLI/LOI ΔV、月相与本影锥的完整 3D 可视化。用它计算文昌发射的
 嫦娥五号/六号、鹊桥二号, 窗口时刻与实际发射差 1.4–13.7 小时 — 假设被证伪。
 
-用 JPL DE440s 历表对三次任务做几何反演 (`verify_scenario.py`), 并与 Bill Gray
-Find_Orb 光学定轨对比:
+用 JPL DE440s 历表对三次任务做几何反演 (原项目 `verify_scenario.py`, 未随本仓库
+移植), 并与 Bill Gray Find_Orb 光学定轨对比:
 
 | 任务 | 预测 LTO 倾角 | 实测倾角 | 反演射向 | 滑行解 |
 |---|---|---|---|---|
@@ -29,8 +30,9 @@ Find_Orb 光学定轨对比:
 三次任务 LTO 面与白道面夹角分别为 4.3°/51.3°/7.8° (鹊桥二号到达时月球近赤道
 节点, 51° 夹角仍正常奔月), 证实 LTO 面只需包含"月球@到达"方向; 射向全部落在
 文昌落区走廊内; 滑行解与公开飞行剖面 (CZ-5 二级滑行设计值 ~1000 s, 器箭分离
-~T+2200 s) 同量级。本工具即基于该验证过的几何构建。相关数据: `../data/*.tle`
-(Find_Orb 密切根数; e≈0.97 时 SGP4 平根数无意义), `../verify_results.txt`。
+~T+2200 s) 同量级。本工具即基于该验证过的几何构建。相关数据（原项目
+`data/*.tle` Find_Orb 密切根数, e≈0.97 时 SGP4 平根数无意义; `verify_results.txt`）
+未随本仓库移植，仅作验证出处说明。
 
 ## 运行
 
@@ -128,6 +130,14 @@ coast_tool/
 5. Bill Gray pseudo-MPECs (projectpluto.com); CNSA/新华社发射公告
 6. NASA Apollo Mission Reports; 中国探月工程中心公开技术资料
 
-## License
+## License 与致谢
 
-MIT
+- **本工具**：移植自 lunarlaunchwindow 项目 `coast_tool/`，MIT License，
+  Copyright (c) 2026 Zhuoxiao；完整许可文本见 [`LICENSE`](LICENSE)。
+- **three.js r147 / OrbitControls**：MIT License，
+  Copyright 2010-2022 Three.js Authors；许可文本见 [`vendor/LICENSE`](vendor/LICENSE)，
+  版权声明保留于 `vendor/three.min.js` 文件头。
+- **地球昼夜贴图**（`assets/earth_day.jpg`、`assets/earth_night.jpg`）：
+  NASA Earth Observatory（Blue Marble / Black Marble），公共领域作品，
+  使用需致谢 NASA。
+- **科学参考文献**：见上节（Meeus、Bate、刘林、裴照宇等）。
