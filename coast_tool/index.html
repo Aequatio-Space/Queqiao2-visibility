@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月球转移发射窗口计算器 · 停泊轨道滑行方案</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #0a0a1a; color: #e0e0e0; overflow: hidden; height: 100vh;
+}
+#app {
+    display: grid;
+    grid-template-columns: 300px 1fr 360px;
+    grid-template-rows: 52px 1fr;
+    height: 100vh;
+}
+#header {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 100%);
+    border-bottom: 1px solid #2a3a4a;
+    display: flex; align-items: center; padding: 0 20px; gap: 14px;
+}
+#header h1 { font-size: 17px; font-weight: 600; color: #f0f0f0; letter-spacing: 1px; }
+#header .subtitle { font-size: 11px; color: #8899aa; }
+
+#controls {
+    background: #0d1117; border-right: 1px solid #1e2d3d;
+    padding: 16px; overflow-y: auto;
+}
+#info-panel {
+    background: #0d1117; border-left: 1px solid #1e2d3d;
+    padding: 16px; overflow-y: auto;
+}
+.panel-title {
+    font-size: 12px; font-weight: 600; color: #58a6ff;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin: 14px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #1e2d3d;
+}
+.panel-title:first-child { margin-top: 0; }
+.control-group { margin-bottom: 12px; }
+.control-group label {
+    display: block; font-size: 11px; color: #8b949e; margin-bottom: 4px; font-weight: 500;
+}
+.control-group select, .control-group input[type="date"],
+.control-group input[type="number"], .control-group input[type="time"] {
+    width: 100%; padding: 6px 10px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 6px; color: #e0e0e0;
+    font-size: 13px; outline: none;
+}
+.control-group select:focus, .control-group input:focus { border-color: #58a6ff; }
+.control-group input[type="range"] {
+    width: 100%; -webkit-appearance: none; height: 5px; border-radius: 3px;
+    background: #30363d; border: none; outline: none; margin-top: 4px;
+}
+.control-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #58a6ff; cursor: pointer;
+}
+.range-value { font-size: 12px; color: #58a6ff; text-align: right; margin-top: 2px; }
+.dual-input { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.site-info {
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 8px 10px; margin-top: 6px; font-size: 11px; line-height: 1.7;
+}
+.site-info span { color: #7ee787; }
+.btn {
+    width: 100%; padding: 9px; border: none; border-radius: 6px;
+    color: white; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 6px;
+}
+.btn-green { background: linear-gradient(135deg, #238636, #2ea043); }
+.btn-blue  { background: linear-gradient(135deg, #1f5fa8, #2f74c0); }
+.btn:hover { opacity: 0.9; }
+details.adv { margin: 8px 0; }
+details.adv summary {
+    font-size: 11px; color: #8b949e; cursor: pointer; user-select: none; padding: 4px 0;
+}
+.toggle-group { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.toggle-group label { margin: 0; font-size: 12px; color: #8b949e; cursor: pointer; user-select: none; }
+.toggle-group input[type="checkbox"] { width: 15px; height: 15px; accent-color: #58a6ff; cursor: pointer; }
+.toggle-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; row-gap: 7px; }
+.toggle-grid .toggle-group { margin-bottom: 0; min-width: 0; }
+.toggle-grid .toggle-group label {
+    font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.toggle-grid .toggle-group input[type="checkbox"] { width: 14px; height: 14px; flex-shrink: 0; }
+.view-controls { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.view-btn {
+    flex: 1; min-width: 56px; padding: 5px 4px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 4px; color: #8b949e;
+    font-size: 11px; cursor: pointer; text-align: center;
+}
+.view-btn:hover, .view-btn.active { background: #1f2937; color: #58a6ff; border-color: #58a6ff; }
+
+#viewport { position: relative; background: #05070c; overflow: hidden; }
+#viewport canvas { display: block; }
+#viewport-overlay {
+    position: absolute; top: 10px; left: 12px; pointer-events: none;
+    font-size: 11px; color: #556677; line-height: 1.6;
+}
+#scheme-note {
+    position: absolute; top: 10px; right: 12px; pointer-events: none;
+    font-size: 11px; color: #667788; text-align: right; line-height: 1.6; max-width: 320px;
+}
+/* Timeline bar */
+#timeline {
+    position: absolute; left: 12px; right: 12px; bottom: 10px;
+    background: rgba(13, 17, 23, 0.88); border: 1px solid #1e2d3d; border-radius: 8px;
+    padding: 8px 12px; display: flex; align-items: center; gap: 10px;
+    backdrop-filter: blur(4px);
+}
+#timeline button {
+    background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+    color: #58a6ff; font-size: 13px; width: 30px; height: 26px; cursor: pointer;
+}
+#timeline button:hover { border-color: #58a6ff; }
+#timeline select {
+    background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+    color: #8b949e; font-size: 11px; padding: 3px; outline: none;
+}
+#timeline input[type="range"] {
+    flex: 1; -webkit-appearance: none; height: 5px; border-radius: 3px;
+    background: #30363d; outline: none;
+}
+#timeline input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #f0883e; cursor: pointer;
+}
+#tl-time { font-size: 12px; color: #e0e0e0; font-variant-numeric: tabular-nums; min-width: 168px; text-align: right; }
+#tl-phase { font-size: 11px; color: #f0883e; min-width: 60px; }
+
+.info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0; border-bottom: 1px solid #161b22; font-size: 12.5px;
+}
+.info-row .label { color: #8b949e; }
+.info-row .value { color: #e0e0e0; font-weight: 500; font-variant-numeric: tabular-nums; }
+.info-row .value.highlight { color: #f0883e; }
+.window-list { margin-top: 6px; }
+.window-item {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border: 1px solid #30363d; border-radius: 8px; padding: 8px 10px;
+    margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s;
+}
+.window-item:hover { border-color: #f0883e; }
+.window-item.active { border-color: #f0883e; box-shadow: 0 0 6px rgba(240,136,62,0.3); }
+.window-item .w-time { font-size: 15px; color: #f0883e; font-weight: 700; font-variant-numeric: tabular-nums; }
+.window-item .w-sub { font-size: 11px; color: #8b949e; margin-top: 2px; }
+.no-window { font-size: 12px; color: #8b949e; padding: 8px; text-align: center; }
+.in-window-slider { margin-top: 4px; }
+
+#moon-phase-display {
+    display: flex; align-items: center; gap: 14px; padding: 10px;
+    background: #161b22; border-radius: 8px; margin-bottom: 8px;
+}
+#moon-phase-canvas { width: 52px; height: 52px; border-radius: 50%; }
+.moon-phase-text .phase-name { font-size: 14px; color: #e0e0e0; font-weight: 600; }
+.moon-phase-text .phase-detail { font-size: 11px; color: #8b949e; margin-top: 3px; }
+
+.chart-box { margin-bottom: 10px; }
+.chart-title { font-size: 11px; color: #8b949e; margin-bottom: 4px; }
+.chart-svg { width: 100%; background: #0f141b; border: 1px solid #1e2d3d; border-radius: 6px; display: block; }
+.chart-hint { font-size: 10px; color: #556677; margin-top: 3px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #8b949e; }
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.legend-line { width: 14px; height: 2px; flex-shrink: 0; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+/* 返回站点首页（多入口站点导航） */
+#header .back-home {
+    margin-left: auto; padding: 5px 12px; font-size: 12px;
+    color: #8b949e; text-decoration: none;
+    border: 1px solid #30363d; border-radius: 6px; white-space: nowrap;
+}
+#header .back-home:hover { color: #58a6ff; border-color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+<div id="header">
+    <h1>月球转移发射窗口计算器</h1>
+    <span class="subtitle">停泊轨道滑行方案 · 变射向 + 变滑行时间 (Chang'e-5 style parking-orbit coast TLI)</span>
+    <a class="back-home" href="/">← 返回首页</a>
+</div>
+
+<!-- ===== 左栏: 参数 ===== -->
+<div id="controls">
+    <div class="panel-title">发射参数</div>
+
+    <div class="control-group">
+        <label>发射场 Launch Site</label>
+        <select id="launch-site">
+            <option value="wenchang">文昌 Wenchang</option>
+            <option value="xichang">西昌 Xichang</option>
+            <option value="ksc">KSC Kennedy</option>
+        </select>
+        <div class="site-info">
+            <div>纬度 <span id="site-lat">19.614°N</span> &nbsp; 经度 <span id="site-lon">110.951°E</span></div>
+            <div>射向走廊(落区约束) <span id="site-corridor">90°–110°</span></div>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <label>发射日期 Launch Date (UTC)</label>
+        <input type="date" id="launch-date">
+    </div>
+
+    <div class="control-group">
+        <label>转移飞行时间 发射→近月 (天)</label>
+        <input type="range" id="transfer-time" min="3.0" max="6.04" step="0.01" value="4.70">
+        <div class="range-value" id="transfer-time-value">4.70 天 (112.8 h)</div>
+    </div>
+
+    <div class="control-group dual-input">
+        <div>
+            <label>走廊方位角下限 (°)</label>
+            <input type="number" id="az-min" value="90" min="0" max="360" step="1">
+        </div>
+        <div>
+            <label>走廊方位角上限 (°)</label>
+            <input type="number" id="az-max" value="110" min="0" max="360" step="1">
+        </div>
+    </div>
+
+    <div class="control-group dual-input">
+        <div>
+            <label>停泊轨道高度 (km)</label>
+            <input type="number" id="parking-alt" value="200" min="150" max="600" step="10">
+        </div>
+        <div>
+            <label>最长滑行 (min)</label>
+            <input type="number" id="max-coast" value="20" min="5" max="200" step="5">
+        </div>
+    </div>
+
+    <div class="control-group dual-input">
+        <div>
+            <label>月球引力修正 (四体打靶)</label>
+            <div style="margin-top:7px;display:flex;align-items:center;gap:6px">
+                <input type="checkbox" id="lunar-grav" checked>
+                <select id="bias-side" style="flex:1" title="近月点 B 面偏置在月球哪一侧: 决定 LOI 轨道面取向与窗口平移方向 (极轨任务两侧对应升交点相差 180° 的两条极轨捕获)">
+                    <option value="0">偏置侧: 自动</option>
+                    <option value="1" selected>偏置侧: + (射向偏大)</option>
+                    <option value="-1">偏置侧: − (射向偏小)</option>
+                </select>
+            </div>
+            <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+                <input type="checkbox" id="polar-lock" checked>
+                <label for="polar-lock" style="margin:0" title="加第三约束 近月点轨道面⊥月轴 (i_M=90°), 控制量增加 TLI 速度偏置 — 与全数值参考解同构">极轨捕获 i=90°</label>
+            </div>
+        </div>
+        <div>
+            <label>近月点目标 (km)</label>
+            <input type="number" id="peri-target" value="150" min="50" max="1000" step="10">
+        </div>
+    </div>
+
+    <details class="adv">
+        <summary>高级: 上升段假设</summary>
+        <div class="control-group dual-input" style="margin-top:8px">
+            <div>
+                <label>上升段耗时 (s)</label>
+                <input type="number" id="ascent-time" value="800" min="400" max="1500" step="20">
+            </div>
+            <div>
+                <label>上升段航程角 (°)</label>
+                <input type="number" id="ascent-arc" value="20" min="8" max="40" step="1">
+            </div>
+        </div>
+    </details>
+
+    <button class="btn btn-green" id="btn-calc">计算当日窗口</button>
+    <button class="btn btn-blue" id="btn-month">扫描 30 天窗口</button>
+
+    <div class="panel-title">视图</div>
+    <div class="control-group">
+        <div class="view-controls">
+            <button class="view-btn active" data-view="default">默认</button>
+            <button class="view-btn" data-view="top">俯视</button>
+            <button class="view-btn" data-view="side">侧视</button>
+            <button class="view-btn" data-view="earth">近地</button>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="toggle-grid">
+            <div class="toggle-group"><input type="checkbox" id="show-ascent" checked><label for="show-ascent">上升段</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-coast" checked><label for="show-coast">停泊滑行</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-lto" checked><label for="show-lto">LTO 转移轨道</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-corridor" checked><label for="show-corridor">射向走廊 (地面)</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-lunar-plane" checked><label for="show-lunar-plane">白道面/月球轨道</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-lto-plane"><label for="show-lto-plane">LTO 轨道面</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-equator"><label for="show-equator">赤道面</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-ecliptic"><label for="show-ecliptic">黄道面</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-site-vec" checked><label for="show-site-vec">发射场矢量 r_S</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-moon-vec" checked><label for="show-moon-vec">月心矢量 r_M</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-labels" checked><label for="show-labels">标签</label></div>
+            <div class="toggle-group"><input type="checkbox" id="show-daynight" checked><label for="show-daynight">昼夜贴图</label></div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#22cc66"></div>发射场</div>
+        <div class="legend-item"><div class="legend-line" style="background:#22cc66"></div>上升段</div>
+        <div class="legend-item"><div class="legend-line" style="background:#2ba8a0"></div>停泊滑行</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00ff88"></div>TLI 点火</div>
+        <div class="legend-item"><div class="legend-line" style="background:#f0883e"></div>转移轨道 LTO</div>
+        <div class="legend-item"><div class="legend-line" style="background:#8899aa"></div>月球轨道</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f0883e;opacity:.5"></div>月球@到达</div>
+    </div>
+</div>
+
+<!-- ===== 中栏: 3D ===== -->
+<div id="viewport">
+    <div id="viewport-overlay">鼠标拖拽旋转 | 滚轮缩放 | 右键平移</div>
+    <div id="scheme-note">
+        方案: 固定射向发射 → 200 km 停泊轨道滑行<br>
+        → 滑行至与"月球@到达"共面相位点 → TLI 点火入 LTO<br>
+        月球引力修正开: 射向/能量按四体近月点打靶加偏置 (3D 仍绘二体 LTO)
+    </div>
+    <div id="timeline">
+        <button id="tl-play" title="播放/暂停">▶</button>
+        <select id="tl-speed">
+            <option value="600">10 min/s</option>
+            <option value="3600" selected>1 h/s</option>
+            <option value="14400">4 h/s</option>
+            <option value="43200">12 h/s</option>
+        </select>
+        <input type="range" id="tl-slider" min="0" max="1000" value="0">
+        <span id="tl-phase">—</span>
+        <span id="tl-time">—</span>
+    </div>
+</div>
+
+<!-- ===== 右栏: 结果 ===== -->
+<div id="info-panel">
+    <div class="panel-title">当日发射窗口 <span style="color:#8b949e;text-transform:none">(UTC+8)</span></div>
+    <div id="window-list" class="window-list"><div class="no-window">点击"计算当日窗口"</div></div>
+    <div class="control-group in-window-slider" id="in-window-box" style="display:none">
+        <label>窗口内发射时刻</label>
+        <input type="range" id="in-window" min="0" max="100" value="50">
+        <div class="range-value" id="in-window-value">--</div>
+    </div>
+
+    <div class="chart-box">
+        <div class="chart-title">方位角 – 发射时刻 (阴影=射向走廊, 橙色=可发射)</div>
+        <svg id="chart-az" class="chart-svg" height="150"></svg>
+        <div class="chart-hint" id="chart-az-hint">曲线: 瞄准"月球@到达"共面所需射向</div>
+    </div>
+    <div class="chart-box">
+        <div class="chart-title">滑行时间 – 发射时刻 (窗口内)</div>
+        <svg id="chart-coast" class="chart-svg" height="110"></svg>
+    </div>
+    <div class="chart-box" id="month-box" style="display:none">
+        <div class="chart-title">30 天窗口扫描 (每日可发射分钟数, 点击选日)</div>
+        <svg id="chart-month" class="chart-svg" height="110"></svg>
+    </div>
+
+    <div class="panel-title">滑行方案 (选定时刻)</div>
+    <div class="info-row"><span class="label">发射时刻</span><span class="value highlight" id="r-launch">--</span></div>
+    <div class="info-row"><span class="label">发射方位角</span><span class="value" id="r-az">--</span></div>
+    <div class="info-row"><span class="label">入轨→TLI 滑行</span><span class="value highlight" id="r-coast">--</span></div>
+    <div class="info-row"><span class="label">TLI 点火时刻</span><span class="value" id="r-tli">--</span></div>
+    <div class="info-row"><span class="label">TLI 后转移角</span><span class="value" id="r-dnu">--</span></div>
+
+    <div class="panel-title">转移轨道 LTO</div>
+    <div class="info-row"><span class="label">倾角 i (赤道)</span><span class="value" id="r-inc">--</span></div>
+    <div class="info-row"><span class="label">升交点赤经 Ω</span><span class="value" id="r-raan">--</span></div>
+    <div class="info-row"><span class="label">偏心率 e</span><span class="value" id="r-ecc">--</span></div>
+    <div class="info-row"><span class="label">远地点高度</span><span class="value" id="r-apo">--</span></div>
+    <div class="info-row"><span class="label">TLI ΔV</span><span class="value highlight" id="r-dv">--</span></div>
+    <div class="info-row"><span class="label">C3</span><span class="value" id="r-c3">--</span></div>
+    <div class="info-row"><span class="label">LTO面-白道面夹角</span><span class="value" id="r-gap">--</span></div>
+
+    <div class="panel-title">月球引力修正 (四体)</div>
+    <div class="info-row"><span class="label">射向偏置 ΔAz</span><span class="value highlight" id="r-bias">--</span></div>
+    <div class="info-row"><span class="label">滑行/ΔV 偏置</span><span class="value" id="r-dvp">--</span></div>
+    <div class="info-row"><span class="label">环月倾角 i_M (近月)</span><span class="value" id="r-im">--</span></div>
+    <div class="info-row"><span class="label">近月点高度 (校验)</span><span class="value" id="r-peri">--</span></div>
+    <div class="info-row"><span class="label">近月点时刻偏差</span><span class="value" id="r-perit">--</span></div>
+    <div class="info-row"><span class="label">若不修正 (二体瞄准)</span><span class="value" id="r-raw">--</span></div>
+
+    <div class="panel-title">到达 · 月球</div>
+    <div id="moon-phase-display">
+        <canvas id="moon-phase-canvas" width="52" height="52"></canvas>
+        <div class="moon-phase-text">
+            <div class="phase-name" id="phase-name">--</div>
+            <div class="phase-detail" id="phase-detail">--</div>
+        </div>
+    </div>
+    <div class="info-row"><span class="label">到达时刻</span><span class="value" id="r-arrival">--</span></div>
+    <div class="info-row"><span class="label">月球赤纬@到达</span><span class="value" id="r-mdec">--</span></div>
+    <div class="info-row"><span class="label">月球距离@到达</span><span class="value" id="r-mdist">--</span></div>
+    <div class="info-row"><span class="label">白道倾角(赤道)</span><span class="value" id="r-minc">--</span></div>
+</div>
+
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+
+<script src="app.js"></script>
+
+
+
+
+
+
+</body>
+</html>
