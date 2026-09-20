@@ -5,7 +5,7 @@
 | 功能区 | 路径 | 内容 |
 | --- | --- | --- |
 | **轨道可见性分析** | `/visibility` | 月球南极极射投影 DEM 光照地形图（实时太阳光照渲染）、极坐标地平线图 / 第一人称 3D 天空视角，底部时间滑块联动展示地球与鹊桥二号（Queqiao-2）中继卫星的全天可见性窗口 |
-| **地月转移轨道可视化** | `/orbits` | 杨维廉论文 24 条地月转移轨道（表 1–4）在冻结 MEP 坐标系中的 three.js 三维展示（`launch_window` 引擎离线求解，SSE 推送） |
+| **地月转移轨道可视化** | `/orbits` | 杨维廉论文 24 条地月转移轨道（表 1–4）在冻结 MEP 坐标系中的 three.js 三维展示：三栏工作台、搜索过滤与族谱分组、**任务时间轴动画**（航天器沿采样轨迹推进、月球沿真实轨迹移动）、**C3 柱状图**（点击选择）、聚焦选中、相机聚焦与视角预设；地球采用 NASA Blue Marble 昼夜贴图（复用 `coast_tool/assets/` 素材）（`launch_window` 引擎离线求解，SSE 推送） |
 | **月球发射窗口计算器** | `/coast_tool/` | 停泊轨道滑行方案（固定射向走廊 → ~200 km 停泊 → 滑行相位闭合 → TLI 入 LTO），四体引力修正支持**任意目标环月倾角 i_M ∈ [0°,180°]**；内置 **CZ-5/CZ-8 火箭能力核对**与**嫦娥五号/鹊桥二号/嫦娥六号三个验证案例**（展示滑行偏长等已知误差）；右侧另附**可选的融合反向求解**（高精度 L6 家族表反解，须确认后运行） |
 
 数据由服务端计算（SPICE 天历 + 月球 DEM），前端全部基于 Canvas/WebGL
@@ -73,7 +73,10 @@ DEM_PATH=/path/to/ldem_87s_5mpp.tif PORT=5050 python viewer/server.py
 ```
 
 轨道 3D 页面读取仓库内置资产 `viewer/data/yang_orbits_xyz.json`（随仓库分发，
-无需运行时求解）。如需在**其他到达历元**重建 24 条论文轨道：
+无需运行时求解）。页面功能：左侧按族谱分组/搜索/勾选显示，点击轨道查看
+p/q 解、C3、近地点/近月点经纬度等详情；底部时间轴可播放全弧段动画
+（1×–8×、逐采样步进、空格播放/暂停），航天器与月球按 121 个采样点运动；
+右栏 C3 柱状图可直接点选轨道。如需在**其他到达历元**重建 24 条论文轨道：
 
 ```bash
 # 约 20 s 单核 CPU；需要 scipy + spiceypy（已在 requirements.txt）
@@ -115,6 +118,22 @@ waitress-serve --host 0.0.0.0 --port $PORT viewer.server:app
 ```
 
 > 单线程（`--workers 1 --threads 1`）：SPICE（spiceypy）非线程安全。
+
+## 安全测试
+
+`scripts/security_smoke_test.sh` 对主页与三个功能区及全部 API 做 12 组 88 项
+安全检查（安全头/CSP/无内联脚本、输入校验矩阵、方法限制、路径穿越、CSRF、
+CSV 注入、IP 伪造、限流、信息泄露、严格 JSON、CORS、融合反解作业）：
+
+```bash
+PYTHON=python3 bash scripts/security_smoke_test.sh   # 默认随机空闲端口
+# 或指定端口 / 解释器
+PORT=5099 PYTHON=/path/to/python bash scripts/security_smoke_test.sh
+```
+
+退出码 0 表示全部通过。测试结果与历次报告见
+`SECURITY_TEST_REPORT.md`、`SECURITY_REGRESSION_REPORT.md`、
+`SECURITY_REVIEW_MULTI_ENTRY.md`。
 
 ## 环境变量
 

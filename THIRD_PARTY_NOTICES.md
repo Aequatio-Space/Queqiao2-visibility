@@ -55,8 +55,9 @@ NASA 数据：
 | `coast_tool/assets/earth_day.jpg` | 地球日面贴图（Blue Marble） | NASA Earth Observatory（Blue Marble 计划，MODIS 数据） |
 | `coast_tool/assets/earth_night.jpg` | 地球夜面贴图（城市灯光） | NASA Earth Observatory / NOAA NGDC（Black Marble 系列） |
 
-上述贴图仅用于 coast_tool 3D 场景的地球昼夜渲染，致谢要求：*"NASA Earth
-Observatory"*；其他行星/月球纹理为程序生成（Canvas 绘制），不涉及第三方素材。
+上述贴图用于 coast_tool 与 `/orbits` 页面 3D 场景的地球昼夜渲染，致谢要求：
+*"NASA Earth Observatory"*；其他行星/月球纹理为程序生成（Canvas 绘制），
+不涉及第三方素材。
 
 ---
 
