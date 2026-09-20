@@ -138,7 +138,37 @@ CSRF             Origin: http://evil.com → 403
 
 ---
 
-## 五、残留风险（纵深防御建议，非阻塞）
+## 五、全站严格安全冒烟测试（2026-09-21）
+
+新增可复用脚本 `scripts/security_smoke_test.sh`（12 组 88 项检查），覆盖
+主页与三个功能区（`/`、`/visibility`、`/orbits`、`/coast_tool/`）及全部 API：
+
+```text
+1  安全响应头 6/6（7 个页面/端点）+ Server 指纹脱敏 + CSP 指令检查
+2  无内联脚本 / 无内联事件处理器（4 页）+ 前端 JS 无 eval/new Function
+3  输入校验矩阵 22 项（400/404，含 NaN/1e999/越界/注入串）+ 无 5xx + 超大请求体 413
+4  方法限制 6 项（405 / 集合端点不可用）
+5  路径穿越 6 项（--path-as-is / 编码 / 双斜杠 / 静态旁路）
+6  CSRF 5 项（跨站 Origin/Referer 403，同源 204）
+7  CSV 公式注入中和 + 超长字段截断
+8  IP 伪造（XFF 被忽略）
+9  信息泄露（health 无路径）/ 严格 JSON（24×121，无 NaN）/ CORS / 404 无堆栈
+10 速率限制（visit、yang_orbits 超限 429）
+11 融合反解作业（启动 / 并发 409 / 结果校验 / coast_max 钳制 / 取消）
+12 /api/stats JSON 结构
+```
+
+结果：**88 项全部通过**。测试同时促成三项加固（已提交）：
+
+| 加固 | 说明 |
+| --- | --- |
+| CSP 增补 `object-src 'none'; base-uri 'none'; form-action 'self'` | 阻断插件嵌入、`<base>` 劫持与跨站表单提交 |
+| 请求体上限 `MAX_CONTENT_LENGTH = 1 MB` + `before_request` 统一拦截 | 对不解析请求体的端点（如 `/api/visit`）也返回 413，防止大体积请求占用内存 |
+| 冒烟脚本端口冲突检测 | 启动时检测 "Address already in use" 并失败退出，避免误测到其他实例 |
+
+---
+
+## 六、残留风险（纵深防御建议，非阻塞）
 
 1. **SSE 长连接**：单 worker 下每个 SSE 连接占用一个请求线程；已限流 20/min，
    建议反代层（Render/Cloudflare）设置单 IP 并发连接上限。

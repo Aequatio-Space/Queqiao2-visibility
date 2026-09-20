@@ -147,6 +147,7 @@ EYE_HEIGHT_M = 2.0         # 第一人称视角眼高（m）
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = bool(os.environ.get("FLASK_DEBUG"))
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 请求体上限 1 MB（本服务仅收小 JSON）
 app.json.ensure_ascii = False  # 中文 API 响应不做 \uXXXX 转义
 
 # 隐藏 Werkzeug 开发服务器的 Server 头指纹。
@@ -192,6 +193,7 @@ def _security_headers(resp):
         "default-src 'self'; script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; connect-src 'self' data:; "
+        "object-src 'none'; base-uri 'none'; form-action 'self'; "
         "frame-ancestors 'none'"
     )
     return resp
@@ -229,6 +231,15 @@ def _csrf_origin_allowed(header_value: str) -> bool:
         return True
     # 同源匹配：比较 host:port（容忍 scheme 差异）
     return netloc == request.host
+
+
+@app.before_request
+def _limit_body_size():
+    """请求体上限（MAX_CONTENT_LENGTH 仅对解析请求体的端点生效，这里统一拦截）。"""
+    limit = app.config.get("MAX_CONTENT_LENGTH")
+    if limit and request.content_length and request.content_length > limit:
+        return jsonify({"error": "请求体过大"}), 413
+    return None
 
 
 @app.before_request
