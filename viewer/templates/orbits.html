@@ -4,272 +4,311 @@
 <meta charset="utf-8" />
 <title>杨维廉论文 24 条转移轨道 — XYZ 三维可视化</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-<meta http-equiv="Pragma" content="no-cache" />
-<meta http-equiv="Expires" content="0" />
 <style>
   :root {
-    --bg: #0a0e1a;
-    --fg: #e8ecf3;
-    --accent: #4ec9ff;
-    --grid: rgba(255,255,255,0.08);
-    --panel-bg: rgba(8, 12, 22, 0.78);
-    --panel-border: rgba(78, 201, 255, 0.25);
-    --coplanar-on: #ffa552;
-    --polar-on: #b07cff;
-    --error: #ff6b6b;
+    --bg: #0a0e16;
+    --panel: #0d1117;
+    --panel-2: #161b22;
+    --edge: #30363d;
+    --text: #e0e0e0;
+    --dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #7ee787;
+    --warn: #e3b341;
+    --error: #f85149;
+    --coplanar: #ffa552;
+    --noncoplanar: #66ddaa;
+    --samedir: #ffe066;
+    --polar: #b07cff;
   }
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
-                background: var(--bg); color: var(--fg);
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  #stage { position: absolute; inset: 0; }
-  canvas { display: block; }
-
-  /* Top status bar */
-  #status {
-    position: absolute; top: 0; left: 0; right: 0;
-    padding: 10px 16px;
-    background: linear-gradient(180deg, var(--panel-bg) 0%, rgba(0,0,0,0) 100%);
-    font-size: 14px; line-height: 1.4;
-    pointer-events: none;
-    z-index: 10;
-  }
-  #status h1 { margin: 0 0 2px 0; font-size: 17px; color: var(--accent); font-weight: 600; }
-  #status p { margin: 0; opacity: 0.7; }
-  #status.error { color: var(--error); }
-
-  /* Loading progress bar (shown while /api/yang_orbits builds orbits) */
-  #progress {
-    position: absolute; top: 8px; right: 16px;
-    width: 240px;
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 6px;
-    padding: 6px 10px 7px 10px;
-    font-size: 11px;
-    line-height: 1.4;
-    z-index: 11;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.4);
-  }
-  #progress.hidden { display: none; }
-  #progress .label {
-    display: flex; justify-content: space-between;
-    margin-bottom: 5px;
-    opacity: 0.85;
-    font-family: ui-monospace, Menlo, monospace;
-  }
-  #progress .label .count { color: var(--accent); font-weight: 600; }
-  #progress .bar-track {
-    height: 6px;
-    background: rgba(255,255,255,0.08);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  #progress .bar-fill {
-    height: 100%; width: 0%;
-    background: linear-gradient(90deg, var(--accent) 0%, var(--coplanar-on) 100%);
-    transition: width 80ms linear;
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", system-ui, sans-serif;
   }
 
-  /* Left control panel */
-  #controls {
-    position: absolute; top: 64px; left: 12px;
-    width: 290px; max-height: calc(100vh - 80px);
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    padding: 12px;
+  #app {
+    display: grid;
+    grid-template-columns: 300px 1fr 340px;
+    grid-template-rows: 52px 1fr;
+    height: 100vh;
+  }
+
+  /* ───────── 顶栏 ───────── */
+  #header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 16px;
+    background: linear-gradient(135deg, #0d1b2a 0%, #131d2b 100%);
+    border-bottom: 1px solid #1e2d3d;
+    z-index: 20;
+  }
+  #header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .5px; white-space: nowrap; }
+  #header .subtitle { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status-msg {
+    margin-left: auto; font-size: 11px; color: var(--dim);
+    font-family: ui-monospace, Menlo, monospace; white-space: nowrap;
+  }
+  #status-msg strong { color: var(--accent); }
+  #header .back-home {
+    padding: 5px 12px; font-size: 12px; color: var(--dim); text-decoration: none;
+    border: 1px solid var(--edge); border-radius: 6px; white-space: nowrap;
+  }
+  #header .back-home:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ───────── 侧栏通用 ───────── */
+  #controls, #meta {
+    background: var(--panel);
     overflow-y: auto;
-    z-index: 10;
+    padding: 12px;
     font-size: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
-  #controls h2 { margin: 0 0 8px 0; font-size: 13px; color: var(--accent); border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
-  #controls h3 { margin: 12px 0 4px 0; font-size: 12px; }
-  #controls h3.coplanar { color: var(--coplanar-on); }
-  #controls h3.noncoplanar { color: #66ddaa; }
-  #controls h3.samedir { color: #ffe066; }
-  #controls h3.polar { color: var(--polar-on); }
-  #controls .panel-head {
+  #controls { border-right: 1px solid #1e2d3d; }
+  #meta { border-left: 1px solid #1e2d3d; }
+
+  .panel-title {
+    font-size: 12px; font-weight: 600; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 1px;
+    margin: 14px 0 8px; padding-bottom: 6px;
+    border-bottom: 1px solid #1e2d3d;
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 8px;
   }
-  #controls .panel-head span {
-    font-size: 13px; color: var(--accent); font-weight: 600;
+  .panel-title:first-child { margin-top: 0; }
+  .panel-title .hint { font-size: 10px; color: var(--dim); text-transform: none; letter-spacing: 0; }
+
+  .btnrow { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .btnrow button {
+    flex: 1; min-width: 56px; padding: 5px 6px;
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 4px;
+    color: var(--dim); font-size: 11px; cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
   }
-  #controls .panel-head button {
-    background: rgba(78, 201, 255, 0.12);
-    color: var(--fg);
-    border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    padding: 2px 8px;
+  .btnrow button:hover { color: var(--accent); border-color: var(--accent); }
+  .btnrow button.on { background: rgba(88, 166, 255, 0.18); color: var(--accent); border-color: var(--accent); }
+
+  #filter {
+    width: 100%; padding: 6px 9px; margin-bottom: 8px;
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 6px;
+    color: var(--text); font-size: 12px; outline: none;
   }
-  #controls .panel-head button:hover { background: rgba(78, 201, 255, 0.28); }
-  #controls .panel-head a.home {
-    margin-left: auto; margin-right: 6px;
-    font-size: 11px; color: var(--fg); text-decoration: none;
-    border: 1px solid var(--panel-border); border-radius: 4px; padding: 2px 8px;
-  }
-  #controls .panel-head a.home:hover { background: rgba(78, 201, 255, 0.28); }
-  #controls.collapsed { width: auto; padding: 6px; }
-  #controls.collapsed #controls-body { display: none; }
-  #controls label.row {
+  #filter:focus { border-color: var(--accent); }
+  #filter::placeholder { color: #556677; }
+
+  /* ───────── 轨道列表 ───────── */
+  .family-group { margin-bottom: 10px; }
+  .family-group h3 {
+    margin: 10px 0 4px; font-size: 11.5px; font-weight: 600;
     display: flex; align-items: center; gap: 6px;
-    padding: 3px 4px;
-    cursor: pointer;
-    border-radius: 4px;
+  }
+  .family-group h3 .count { color: var(--dim); font-weight: 400; font-size: 10px; margin-left: auto; }
+  .family-group h3 .fam-toggle {
+    background: transparent; border: 1px solid var(--edge); border-radius: 3px;
+    color: var(--dim); font-size: 9px; padding: 0 5px; cursor: pointer;
+  }
+  .family-group h3 .fam-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .family-group.coplanar h3 { color: var(--coplanar); }
+  .family-group.noncoplanar h3 { color: var(--noncoplanar); }
+  .family-group.samedir h3 { color: var(--samedir); }
+  .family-group.polar h3 { color: var(--polar); }
+
+  .orbit-row {
+    display: flex; align-items: center; gap: 7px;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer;
+    border: 1px solid transparent;
     user-select: none;
   }
-  #controls label.row:hover { background: rgba(255,255,255,0.05); }
-  #controls label.row input { margin: 0; }
-  #controls label.row .swatch {
-    display: inline-block; width: 12px; height: 12px;
-    border-radius: 2px;
-    border: 1px solid rgba(255,255,255,0.3);
-    flex-shrink: 0;
+  .orbit-row:hover { background: rgba(255, 255, 255, 0.05); }
+  .orbit-row.active { background: rgba(88, 166, 255, 0.14); border-color: var(--accent); }
+  .orbit-row.hidden-by-filter { display: none; }
+  .orbit-row input { margin: 0; flex-shrink: 0; }
+  .orbit-row .swatch {
+    width: 12px; height: 12px; border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.3); flex-shrink: 0;
   }
-  #controls label.row .name { flex: 1; }
-  #controls label.row .meta { font-size: 10px; opacity: 0.55; font-family: ui-monospace, Menlo, monospace; }
-  #controls .btnrow {
-    display: flex; gap: 6px; margin: 0 0 8px 0;
+  .orbit-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .orbit-row .name .sub { color: var(--dim); font-size: 10px; }
+  .orbit-row .meta {
+    font-size: 10px; color: var(--dim);
+    font-family: ui-monospace, Menlo, monospace; white-space: nowrap;
   }
-  #controls .btnrow button {
-    flex: 1;
-    padding: 4px 8px;
-    background: rgba(78, 201, 255, 0.12);
-    color: var(--fg);
-    border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-  }
-  #controls .btnrow button:hover { background: rgba(78, 201, 255, 0.28); }
 
-  /* Right panel: orbit metadata + camera presets */
-  #meta {
-    position: absolute; top: 64px; right: 12px;
-    width: 250px; max-height: calc(100vh - 80px);
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    padding: 12px;
-    overflow-y: auto;
-    z-index: 10;
-    font-size: 12px;
+  /* ───────── 图层开关 ───────── */
+  .toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 8px; }
+  .toggle-grid label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--dim); cursor: pointer;
+    white-space: nowrap; overflow: hidden;
   }
-  #meta h2 { margin: 0 0 8px 0; font-size: 13px; color: var(--accent); border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
-  #meta pre {
-    margin: 0;
-    background: rgba(0,0,0,0.4);
-    padding: 8px;
-    border-radius: 4px;
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 11px;
-    white-space: pre;
-    overflow-x: auto;
-  }
-  #meta .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  #meta button {
-    flex: 1;
-    padding: 5px 8px;
-    background: rgba(78, 201, 255, 0.15);
-    color: var(--fg);
-    border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-  }
-  #meta button:hover { background: rgba(78, 201, 255, 0.3); }
-  #meta button.toggle {
-    background: rgba(255,255,255,0.06);
-    border-color: rgba(255,255,255,0.2);
-  }
-  #meta button.toggle.on { background: rgba(78, 201, 255, 0.4); }
+  .toggle-grid input { margin: 0; accent-color: var(--accent); }
 
-  /* Bottom help */
-  #help {
-    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; opacity: 0.6;
-    background: var(--panel-bg);
-    padding: 4px 10px; border-radius: 12px;
-    pointer-events: none;
-    z-index: 10;
+  /* ───────── 3D 视口 ───────── */
+  #viewport { position: relative; background: #05070c; overflow: hidden; min-width: 0; }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { display: block; }
+
+  #progress {
+    position: absolute; top: 10px; right: 12px; width: 250px;
+    background: rgba(13, 17, 23, 0.88); border: 1px solid #1e2d3d;
+    border-radius: 8px; padding: 7px 11px; font-size: 11px;
+    z-index: 12; backdrop-filter: blur(4px);
+  }
+  #progress.hidden { display: none; }
+  #progress .label { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--dim); }
+  #progress .label .count { color: var(--accent); font-weight: 600; }
+  #progress .bar-track { height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
+  #progress .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--coplanar)); transition: width 80ms linear; }
+
+  #viewport-hint {
+    position: absolute; top: 10px; left: 12px;
+    font-size: 11px; color: #556677; pointer-events: none; z-index: 10;
+  }
+
+  /* 时间轴 */
+  #timeline {
+    position: absolute; left: 12px; right: 12px; bottom: 10px;
+    background: rgba(13, 17, 23, 0.9); border: 1px solid #1e2d3d;
+    border-radius: 8px; padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px;
+    z-index: 12; backdrop-filter: blur(4px);
+  }
+  #timeline button {
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 4px;
+    color: var(--accent); font-size: 13px; width: 32px; height: 26px; cursor: pointer;
+  }
+  #timeline button:hover:not(:disabled) { border-color: var(--accent); }
+  #timeline button:disabled { color: #445; cursor: not-allowed; }
+  #timeline select {
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 4px;
+    color: var(--dim); font-size: 11px; padding: 3px; outline: none;
+  }
+  #timeline input[type="range"] {
+    flex: 1; min-width: 80px; accent-color: var(--accent); height: 4px;
+  }
+  #timeline input[type="range"]:disabled { opacity: .4; }
+  #tl-time {
+    font-size: 12px; color: var(--text); min-width: 132px; text-align: center;
+    font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace;
+  }
+  #tl-phase {
+    font-size: 11px; color: var(--accent); min-width: 74px; text-align: right;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+
+  /* ───────── 右栏信息 ───────── */
+  .info-rows { font-size: 11.5px; line-height: 1.7; }
+  .info-rows .hint { color: var(--dim); font-size: 11px; }
+  .info-row { display: flex; gap: 8px; padding: 1px 0; }
+  .info-row .label { color: var(--dim); flex: 0 0 108px; }
+  .info-row .value {
+    flex: 1; min-width: 0; text-align: right; color: var(--text);
+    font-variant-numeric: tabular-nums; word-break: break-word;
+  }
+  .info-row .value.highlight { color: var(--accent); font-weight: 600; }
+  .info-rows .raw {
+    margin-top: 8px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 7px 9px; font-size: 10.5px;
+    font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap;
+    color: var(--dim); max-height: 190px; overflow: auto;
+  }
+  .info-rows .raw summary { cursor: pointer; color: var(--accent); font-size: 11px; }
+
+  .chart-svg { width: 100%; background: #0f141b; border: 1px solid var(--edge); border-radius: 6px; display: block; }
+  .chart-hint { font-size: 10px; color: #556677; margin-top: 4px; line-height: 1.6; }
+
+  #legend { display: flex; flex-direction: column; gap: 5px; font-size: 11px; }
+  #legend .item { display: flex; align-items: center; gap: 7px; color: var(--dim); }
+  #legend .swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+  #legend .item b { color: var(--text); font-weight: 500; }
+  #legend .item .n { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 1100px) {
+    #app { grid-template-columns: 260px 1fr 300px; }
+  }
+  @media (max-width: 900px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: 52px 240px 1fr 240px; height: auto; min-height: 100vh; }
+    #viewport { min-height: 60vh; }
+    html, body { overflow: auto; }
   }
 </style>
 </head>
 <body>
 
-<div id="stage"></div>
+<div id="app">
+  <header id="header">
+    <h1>杨维廉论文转移轨道 · XYZ 三维可视化</h1>
+    <span class="subtitle">24 条地月转移轨道（表 1–4）· 冻结 MEP 坐标系 · 1 单位 = 1000 km</span>
+    <span id="status-msg">加载轨道数据…</span>
+    <a class="back-home" href="/">← 返回首页</a>
+  </header>
 
-<div id="status">
-  <h1>杨维廉论文中的地月转移轨道可视化</h1>
-  <p id="status-msg">加载 <code>/api/yang_orbits</code> …</p>
-</div>
-
-<div id="progress" class="hidden">
-  <div class="label">
-    <span>正在构建轨道…</span>
-    <span class="count"><span id="progress-current">0</span> / <span id="progress-total">0</span></span>
-  </div>
-  <div class="bar-track"><div class="bar-fill" id="progress-fill"></div></div>
-</div>
-
-<div id="controls">
-  <div class="panel-head">
-    <span>轨道可见性</span>
-    <a class="home" href="/">← 首页</a>
-    <button id="collapse-controls" type="button" title="收起面板">«</button>
-  </div>
-  <div id="controls-body">
-    <div class="btnrow" id="orbit-select-row">
+  <aside id="controls">
+    <div class="panel-title">轨道选择 <span class="hint" id="sel-count">0 / 0 显示</span></div>
+    <input type="text" id="filter" placeholder="搜索：编号 / 族 / T / 倾角 …" autocomplete="off" />
+    <div class="btnrow">
       <button id="select-all" type="button">全选</button>
       <button id="select-none" type="button">全不选</button>
+      <button id="focus-toggle" type="button" title="仅高亮选中轨道，其余变暗">聚焦选中</button>
     </div>
-    <h3 class="coplanar">表 1：12 条共面转移 (T=72/96/120 h)</h3>
-    <div id="list-coplanar"></div>
-    <h3 class="noncoplanar">表 2：4 条非共面转移 (i₀=5°/175°)</h3>
-    <div id="list-noncoplanar"></div>
-    <h3 class="samedir">表 3：4 条同向发射 (i₀=10°)</h3>
-    <div id="list-samedir"></div>
-    <h3 class="polar">表 4：4 条极月卫星转移 (i₀=5°)</h3>
-    <div id="list-polar"></div>
-  </div>
+    <div id="orbit-lists"></div>
+
+    <div class="panel-title">视角</div>
+    <div class="btnrow" id="view-row">
+      <button data-view="free" type="button">自由</button>
+      <button data-view="from_moon_pov" type="button">从月球看地球</button>
+      <button data-view="from_earth_pov" type="button">从地球看月球</button>
+      <button data-view="xy" type="button">XY 面</button>
+      <button data-view="xz" type="button">XZ 面</button>
+      <button data-view="yz" type="button">YZ 面</button>
+      <button data-view="iso" type="button">等距</button>
+      <button data-view="fit" type="button" title="缩放到选中轨道">聚焦选中</button>
+    </div>
+
+    <div class="panel-title">显示图层</div>
+    <div class="toggle-grid" id="layer-toggles"></div>
+  </aside>
+
+  <main id="viewport">
+    <div id="stage"></div>
+    <div id="viewport-hint">左键拖动旋转 · 滚轮缩放 · 右键平移 · 空格播放/暂停</div>
+    <div id="progress" class="hidden">
+      <div class="label">
+        <span id="progress-label">加载轨道数据…</span>
+        <span class="count"><span id="progress-current">0</span> / <span id="progress-total">0</span></span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="progress-fill"></div></div>
+    </div>
+    <div id="timeline">
+      <button id="tl-play" type="button" title="播放/暂停 (空格)">▶</button>
+      <button id="tl-prev" type="button" title="上一采样 (←)">⏮</button>
+      <button id="tl-next" type="button" title="下一采样 (→)">⏭</button>
+      <select id="tl-speed" title="播放速度">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+      </select>
+      <input type="range" id="tl-slider" min="0" max="1000" value="1000" disabled />
+      <span id="tl-time">--</span>
+      <span id="tl-phase">选择轨道</span>
+    </div>
+  </main>
+
+  <aside id="meta">
+    <div class="panel-title">选中轨道</div>
+    <div id="meta-body" class="info-rows"><div class="hint">点击左侧轨道查看详情；勾选框控制显示。</div></div>
+
+    <div class="panel-title">C3 – 轨道编号 <span class="hint">点击柱选择</span></div>
+    <svg id="chart-c3" class="chart-svg" height="132" viewBox="0 0 340 132" preserveAspectRatio="none"></svg>
+    <div class="chart-hint">C3 = 近月点双曲剩余速度² (km²/s²)，越小越省能量；同族内随 T 增大而减小。</div>
+
+    <div class="panel-title">族谱图例</div>
+    <div id="legend"></div>
+  </aside>
 </div>
 
-<div id="meta">
-  <h2>选中轨道</h2>
-  <pre id="meta-body">（点击左栏轨道查看元数据）</pre>
-  <h2 style="margin-top:14px;">视角预设</h2>
-  <div class="btnrow">
-    <button data-view="free">自由轨道</button>
-    <button data-view="from_moon_pov">从月球看地球</button>
-    <button data-view="from_earth_pov">从地球看月球</button>
-    <button data-view="xy">XY 平面（地月）</button>
-    <button data-view="xz">XZ 平面</button>
-    <button data-view="yz">YZ 平面</button>
-    <button data-view="iso">等距</button>
-  </div>
-  <h2 style="margin-top:14px;">显示</h2>
-  <div class="btnrow">
-    <button class="toggle on" data-layer="earth">地球</button>
-    <button class="toggle on" data-layer="moon">月球</button>
-    <button class="toggle on" data-layer="axis">XYZ 轴</button>
-    <button class="toggle on" data-layer="moonline">地月连线</button>
-    <button class="toggle on" data-layer="moontrack">月球轨迹</button>
-    <button class="toggle on" data-layer="labels">轨道编号</button>
-    <button class="toggle on" data-layer="earthgraticule" title="地球经纬度网格 (赤道 + 4 条子午线 + 4 条纬圈)">地球经纬</button>
-    <button class="toggle on" data-layer="moongraticule" title="月球经纬度网格">月球经纬</button>
-    <button class="toggle on" data-layer="moonaxis" title="月球自转轴 + 南北极标注">月球自转轴</button>
-    <button class="toggle" data-layer="grid">XYZ 网格</button>
-    <button class="toggle" data-layer="endpoints">起末点</button>
-  </div>
-</div>
-
-<div id="help">左键拖动：旋转 &nbsp;·&nbsp; 滚轮：缩放 &nbsp;·&nbsp; 右键拖动：平移</div>
-
-<!-- three.js + OrbitControls (vendored copies, no CDN dependency) -->
 <script src="{{ url_for('static', filename='vendor/three.min.js') }}"></script>
 <script src="{{ url_for('static', filename='orbits.js') }}"></script>
 </body>
