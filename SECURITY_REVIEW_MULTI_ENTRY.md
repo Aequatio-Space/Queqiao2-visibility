@@ -87,7 +87,58 @@ T12 CORS / health      ACAO 0 次；health 仅布尔状态，无 /Users/ 路径
 
 ---
 
-## 四、残留风险（纵深防御建议，非阻塞）
+## 四、融合反向求解作业（coast_tool 可选工具，新增）
+
+### 4.1 设计
+
+- 反解为 CPU 密集长作业（单日 ~10 s、整月数分钟）。为不阻塞单线程 Web
+  服务（SPICE 非线程安全），Web 层**不**在请求内计算，而是以子进程运行
+  `scripts/fusion_inverse_job.py`（`start_new_session=True`，可整组回收）；
+- Web 层仅做参数校验、作业调度、状态查询与结果读取；
+- 同一时刻仅一个作业（全局锁 + 409），作业可取消，超时（默认 1 h）由
+  状态端点看门狗终止，产物 48 h 后自动清理。
+
+### 4.2 攻击面处置
+
+| 风险 | 处置 |
+| --- | --- |
+| 命令注入 | 子进程参数由**校验后的数值/白名单**拼装（无 shell、`shell=False`）；站点白名单、日期 `strptime`、T 吸附到预生成表格、`coast_max_s` 钳制 0–3600 |
+| 路径注入 | `job_id` 由服务端生成（16 位十六进制），查询/取消路径先 `fullmatch` 白名单校验；作业目录由 id 拼接，无用户路径输入 |
+| 未确认即运行（资源滥用） | 请求体必须 `confirm=true`，否则 400；前端另有确认对话框 |
+| 并发滥用 | 单作业槽位（409）+ 启动限流 10/10 min（独立计数桶） |
+| 密钥泄漏给子进程 | 子进程环境**最小化**（仅 PATH/HOME/PYTHONUNBUFFERED/FUSION_TABLE_DIR/SPICE_KERNEL_DIR），不继承服务端环境变量 |
+| 作业目录无限增长 | 启动时清理 >48 h 旧目录；单作业产物在作业目录内 |
+| 状态接口信息泄露 | 仅返回状态/耗时/窗口数值与配置（无文件系统路径）；不返回原始日志 |
+| CSRF | 复用全局 `before_request` Origin/Referer 校验（POST/DELETE 均覆盖） |
+| 结果注入前端 | 前端以 `textContent` 渲染全部字段，无 `innerHTML` |
+
+### 4.3 回归结果（2026-09-21，本地 5087/5088 端口）
+
+```text
+校验矩阵         no confirm / bad date / start>=end / span 40d / T=NaN / T=72 /
+                 site=evil → 全部 400；coast_max_s=-5 钳制为 0 后正常受理
+路径安全         job_id ../../etc/passwd（--path-as-is）→ 404；
+                 %2e%2e%2f 编码穿越 → 404；不存在的合法 id → 404
+CSRF             Origin: http://evil.com → 403
+并发             作业运行中再次提交 → 409
+限流             启动端点 10/10min 独立计数（测试中超额后 429）
+吸附/钳制        T=112.75 → 112.7 h（命中预生成表）；coast_max_s=99999 → 3600
+作业生命周期     2 天范围：6 窗口 / 16.6 s；取消后状态 cancelled；
+                 result.json 含窗口列表 + 拒绝统计；子进程最小环境验证通过
+```
+
+### 4.4 残留风险（非阻塞）
+
+1. **内存**：融合子进程加载 scipy + spiceypy（~150–250 MB）；与 Web 进程
+   同机时需确保实例内存充足（Render free 512 MB 较紧张，建议更高配）。
+2. **CPU 争用**：作业运行期间单 vCPU 实例的页面响应会变慢；确认对话框已
+   明示，建议生产使用 ≥2 vCPU 或独立 worker。
+3. **Serverless 不适用**：Vercel 实例在响应后冻结/回收，无法承载分钟级
+   后台子进程；该功能需常驻服务（Render / Docker）。
+
+---
+
+## 五、残留风险（纵深防御建议，非阻塞）
 
 1. **SSE 长连接**：单 worker 下每个 SSE 连接占用一个请求线程；已限流 20/min，
    建议反代层（Render/Cloudflare）设置单 IP 并发连接上限。

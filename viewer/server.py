@@ -45,9 +45,15 @@ import io
 import json
 import math
 import os
+import re
+import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import threading
+import time
+import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -102,6 +108,21 @@ DEFAULT_DATE = "2026-08-15"
 COAST_TOOL_DIR = os.path.join(_REPO_ROOT, "coast_tool")
 YANG_ORBITS_JSON = os.path.join(BASE_DIR, "data", "yang_orbits_xyz.json")
 YANG_ORBITS_DEFAULT_T_ARRIVE = "2026-08-24T00:00:00Z"
+
+# 融合反向求解（fusion FR-4）后台作业：
+# 单日约 10 s、整月数分钟的 CPU 密集计算。SPICE 非线程安全，若在 Web
+# 进程内运行会阻塞单线程服务，故以子进程运行 scripts/fusion_inverse_job.py，
+# Web 层只做参数校验、作业调度与结果读取（子进程隔离 + 超时看门狗）。
+FUSION_JOB_DIR = os.environ.get("FUSION_JOB_DIR", os.path.join(BASE_DIR, "jobs"))
+FUSION_TABLE_DIR = os.environ.get(
+    "FUSION_TABLE_DIR", os.path.join(BASE_DIR, "data", "fusion_tables")
+)
+FUSION_SCRIPT = os.path.join(_REPO_ROOT, "scripts", "fusion_inverse_job.py")
+FUSION_MAX_SPAN_DAYS = 31
+FUSION_JOB_TIMEOUT_S = int(os.environ.get("FUSION_JOB_TIMEOUT_S", "3600"))
+FUSION_EST_SEC_PER_DAY = 15.0
+FUSION_SITES = ("wenchang", "xichang", "ksc")
+FUSION_I_M_DEG = 90.0
 
 # 极射投影 → 经纬度使用月球赤道半径（与 utils.lonlat_to_polar_stereo_xy 一致）
 MOON_R_M = u.MOON_R_EQ_M
@@ -1056,6 +1077,362 @@ def _yang_orbits_meta(data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 融合反向求解（fusion FR-4）作业调度
+# ---------------------------------------------------------------------------
+@lru_cache(maxsize=1)
+def _fusion_supported_T() -> tuple[float, ...]:
+    """从预生成家族表目录解析支持的转移时间 T（小时）。
+
+    家族表命名由 ``fusion._table_path`` 决定（i_m=90000、Hm200、meq、sun），
+    对应极轨捕获（i_m=90°）、月球真极轴参考、近月点 200 km、含太阳摄动。
+    """
+    values: set[float] = set()
+    if os.path.isdir(FUSION_TABLE_DIR):
+        for name in os.listdir(FUSION_TABLE_DIR):
+            m = re.fullmatch(r"r1s_scan_im90000_T(\d{4})_Hm200_meq_sun\.json", name)
+            if m:
+                values.add(int(m.group(1)) / 10.0)
+    return tuple(sorted(values))
+
+
+def _fusion_snap_T(t_h: float) -> float | None:
+    """把请求的 T 吸附到最近的预生成表格；偏差 > 0.35 h 视为不支持。"""
+    supported = _fusion_supported_T()
+    if not supported:
+        return None
+    nearest = min(supported, key=lambda s: abs(s - t_h))
+    return nearest if abs(nearest - t_h) <= 0.35 else None
+
+
+def _parse_date_field(value, name: str) -> datetime:
+    """严格解析作业日期字段（YYYY-MM-DD，1900–2050）。"""
+    if not isinstance(value, str):
+        raise BadRequest(f"{name} 必须为 YYYY-MM-DD 格式")
+    try:
+        dt = datetime.strptime(value.strip(), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise BadRequest(f"{name} 必须为 YYYY-MM-DD 格式的有效日期")
+    if not (1900 <= dt.year <= 2050):
+        raise BadRequest(f"{name} 必须在 1900–2050 年（SPICE 内核覆盖范围）")
+    return dt
+
+
+def _fusion_job_dir(job_id: str) -> str:
+    """作业目录（job_id 已通过 16 位十六进制白名单校验，无路径注入面）。"""
+    return os.path.join(FUSION_JOB_DIR, job_id)
+
+
+def _fusion_job_meta(job_id: str) -> dict | None:
+    path = os.path.join(_fusion_job_dir(job_id), "meta.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _write_fusion_marker(job_id: str, status: str, error: str | None = None) -> None:
+    try:
+        with open(
+            os.path.join(_fusion_job_dir(job_id), "state.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump({"status": status, "error": error}, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def _read_fusion_marker(job_id: str) -> dict | None:
+    path = os.path.join(_fusion_job_dir(job_id), "state.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            marker = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return marker if isinstance(marker, dict) else None
+
+
+def _terminate_fusion_proc(proc: subprocess.Popen) -> None:
+    """终止作业子进程组（start_new_session=True，可整组回收）。"""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=10)
+    except (subprocess.TimeoutExpired, OSError):
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
+def _fusion_cleanup_old_jobs(max_age_s: float = 48 * 3600.0) -> None:
+    """清理超过 48 h 的旧作业目录（防止磁盘无限增长）。"""
+    if not os.path.isdir(FUSION_JOB_DIR):
+        return
+    now = time.time()
+    try:
+        entries = os.listdir(FUSION_JOB_DIR)
+    except OSError:
+        return
+    for name in entries:
+        path = os.path.join(FUSION_JOB_DIR, name)
+        try:
+            if os.path.isdir(path) and now - os.path.getmtime(path) > max_age_s:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            continue
+
+
+_fusion_lock = threading.Lock()
+_fusion_active: dict | None = None
+
+
+@app.route("/coast_tool/api/fusion/config")
+@_rate_limit(120, 60.0, scope="fusion_config")
+def fusion_config():
+    """融合反解可用配置（支持的 T 列表、站点、规模与耗时估计）。"""
+    return jsonify(
+        {
+            "supported_T_h": list(_fusion_supported_T()),
+            "sites": list(FUSION_SITES),
+            "i_m_deg": FUSION_I_M_DEG,
+            "polar_ref": "moon_equator",
+            "max_span_days": FUSION_MAX_SPAN_DAYS,
+            "est_sec_per_day": FUSION_EST_SEC_PER_DAY,
+            "ready": bool(_fusion_supported_T()) and os.path.isfile(FUSION_SCRIPT),
+        }
+    )
+
+
+@app.route("/coast_tool/api/fusion/jobs", methods=["POST"])
+@_rate_limit(10, 600.0, scope="fusion_start")
+def fusion_start_job():
+    """启动一次融合反向求解作业（长耗时，须 confirm=true）。
+
+    请求体（JSON）::
+
+        {"start": "2026-08-24", "end": "2026-08-25", "T_h": 112.8,
+         "site": "wenchang", "coast_max_s": 1200, "confirm": true}
+
+    仅支持预生成家族表覆盖的 T（自动吸附 ±0.35 h）；同一时刻只允许一个
+    作业（CPU 密集），重复提交返回 409。
+    """
+    global _fusion_active
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise BadRequest("请求体必须为 JSON 对象")
+    if str(body.get("confirm", "")).lower() not in ("1", "true", "yes", "on"):
+        raise BadRequest("长耗时计算须显式确认（confirm=true）")
+
+    start_dt = _parse_date_field(body.get("start"), "start")
+    end_dt = _parse_date_field(body.get("end"), "end")
+    span_days = (end_dt - start_dt).days
+    if span_days < 1:
+        raise BadRequest("end 必须晚于 start（右开区间，至少 1 天）")
+    if span_days > FUSION_MAX_SPAN_DAYS:
+        raise BadRequest(f"扫描范围最长 {FUSION_MAX_SPAN_DAYS} 天")
+
+    try:
+        t_requested = float(body.get("T_h"))
+    except (TypeError, ValueError):
+        raise BadRequest("T_h 必须为数字（小时）")
+    if not math.isfinite(t_requested):
+        raise BadRequest("T_h 必须为有限数")
+    t_h = _fusion_snap_T(t_requested)
+    if t_h is None:
+        supported = ", ".join(f"{s:g}" for s in _fusion_supported_T()) or "无"
+        raise BadRequest(f"当前仅支持 T ∈ {{{supported}}} h（自动吸附 ±0.35 h）")
+
+    site = str(body.get("site", "wenchang")).strip().lower()
+    if site not in FUSION_SITES:
+        raise BadRequest(f"site 必须为 {', '.join(FUSION_SITES)} 之一")
+
+    try:
+        coast_max_s = float(body.get("coast_max_s", 1200.0))
+    except (TypeError, ValueError):
+        raise BadRequest("coast_max_s 必须为数字")
+    if not math.isfinite(coast_max_s):
+        raise BadRequest("coast_max_s 必须为有限数")
+    coast_max_s = min(max(coast_max_s, 0.0), 3600.0)
+
+    if not os.path.isfile(FUSION_SCRIPT):
+        return jsonify({"error": "融合求解脚本缺失"}), 503
+    if not _fusion_supported_T():
+        return jsonify({"error": "融合家族表资产缺失"}), 503
+
+    with _fusion_lock:
+        if _fusion_active is not None and _fusion_active["proc"].poll() is None:
+            return jsonify({"error": "已有融合反解作业在运行，请稍后再试"}), 409
+        _fusion_cleanup_old_jobs()
+        job_id = uuid.uuid4().hex[:16]
+        job_dir = _fusion_job_dir(job_id)
+        os.makedirs(job_dir, exist_ok=False)
+        config = {
+            "start": start_dt.strftime("%Y-%m-%d"),
+            "end": end_dt.strftime("%Y-%m-%d"),
+            "T_h": t_h,
+            "T_requested_h": t_requested,
+            "site": site,
+            "coast_max_s": coast_max_s,
+            "i_m_deg": FUSION_I_M_DEG,
+            "polar_ref": "moon_equator",
+            "span_days": span_days,
+        }
+        with open(
+            os.path.join(job_dir, "meta.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump(
+                {
+                    "id": job_id,
+                    "created_utc": datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "config": config,
+                },
+                f,
+                ensure_ascii=False,
+            )
+        # 最小化子进程环境（不继承服务端可能存在的密钥类变量）
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+            "PYTHONUNBUFFERED": "1",
+            "FUSION_TABLE_DIR": FUSION_TABLE_DIR,
+        }
+        if os.environ.get("SPICE_KERNEL_DIR"):
+            env["SPICE_KERNEL_DIR"] = os.environ["SPICE_KERNEL_DIR"]
+        stdout_path = os.path.join(job_dir, "stdout.log")
+        with open(stdout_path, "ab") as out:
+            proc = subprocess.Popen(  # noqa: S603 - 参数均来自白名单校验
+                [
+                    sys.executable,
+                    FUSION_SCRIPT,
+                    "--start",
+                    config["start"],
+                    "--end",
+                    config["end"],
+                    "--T",
+                    f"{t_h:g}",
+                    "--site",
+                    site,
+                    "--coast-max",
+                    f"{coast_max_s:g}",
+                    "--out",
+                    job_dir,
+                ],
+                cwd=_REPO_ROOT,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+            )
+        _fusion_active = {
+            "id": job_id,
+            "proc": proc,
+            "started": time.monotonic(),
+        }
+
+    return (
+        jsonify(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "config": config,
+                "estimated_s": int(span_days * FUSION_EST_SEC_PER_DAY),
+            }
+        ),
+        202,
+    )
+
+
+@app.route("/coast_tool/api/fusion/jobs/<job_id>")
+@_rate_limit(240, 60.0, scope="fusion_status")
+def fusion_job_status(job_id: str):
+    """查询作业状态；完成后返回 ``result``（窗口列表 + 拒绝统计）。"""
+    global _fusion_active
+    if not re.fullmatch(r"[0-9a-f]{16}", job_id or ""):
+        raise BadRequest("job_id 非法")
+    meta = _fusion_job_meta(job_id)
+    if meta is None:
+        return jsonify({"error": "作业不存在或已过期"}), 404
+
+    with _fusion_lock:
+        active = (
+            _fusion_active
+            if (_fusion_active is not None and _fusion_active["id"] == job_id)
+            else None
+        )
+        proc = active["proc"] if active else None
+        if proc is not None and proc.poll() is not None:
+            _fusion_active = None
+            active, proc = None, None
+        elapsed = (time.monotonic() - active["started"]) if active else None
+        if (
+            proc is not None
+            and elapsed is not None
+            and elapsed > FUSION_JOB_TIMEOUT_S
+        ):
+            _terminate_fusion_proc(proc)
+            _fusion_active = None
+            _write_fusion_marker(job_id, "failed", "作业超时被终止")
+            proc, elapsed = None, None
+
+    payload: dict = {
+        "job_id": job_id,
+        "status": "unknown",
+        "config": meta.get("config"),
+    }
+    if proc is not None:
+        payload.update(status="running", elapsed_s=round(elapsed or 0.0, 1))
+        return jsonify(payload)
+
+    result_path = os.path.join(_fusion_job_dir(job_id), "result.json")
+    marker = _read_fusion_marker(job_id)
+    if os.path.isfile(result_path):
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                result = json.load(f)
+            payload.update(status="done", result=result)
+        except (OSError, json.JSONDecodeError):
+            payload.update(status="failed", error="结果文件损坏")
+    elif marker and marker.get("status") == "cancelled":
+        payload.update(status="cancelled")
+    elif marker and marker.get("status") == "failed":
+        payload.update(status="failed", error=marker.get("error") or "作业失败")
+    else:
+        payload.update(
+            status="unknown", error="作业进程句柄已丢失（服务可能重启过），可稍后重试查询"
+        )
+    return jsonify(payload)
+
+
+@app.route("/coast_tool/api/fusion/jobs/<job_id>", methods=["DELETE"])
+@_rate_limit(10, 60.0, scope="fusion_cancel")
+def fusion_cancel_job(job_id: str):
+    """取消运行中的作业（终止子进程组）。"""
+    global _fusion_active
+    if not re.fullmatch(r"[0-9a-f]{16}", job_id or ""):
+        raise BadRequest("job_id 非法")
+    if _fusion_job_meta(job_id) is None:
+        return jsonify({"error": "作业不存在或已过期"}), 404
+    with _fusion_lock:
+        if _fusion_active is not None and _fusion_active["id"] == job_id:
+            proc = _fusion_active["proc"]
+            if proc.poll() is None:
+                _terminate_fusion_proc(proc)
+            _fusion_active = None
+            _write_fusion_marker(job_id, "cancelled")
+    return jsonify({"job_id": job_id, "status": "cancelled"})
+
+
+# ---------------------------------------------------------------------------
 # 页面
 # ---------------------------------------------------------------------------
 @app.route("/")
@@ -1418,6 +1795,8 @@ def health():
             "spice_ready": _SPICE_READY,
             "orbit_data": os.path.isfile(YANG_ORBITS_JSON),
             "coast_tool": os.path.isfile(os.path.join(COAST_TOOL_DIR, "index.html")),
+            "fusion_ready": bool(_fusion_supported_T())
+            and os.path.isfile(FUSION_SCRIPT),
             "r_eq_m": round(float(R_EQ), 1),
             "r_pol_m": round(float(R_POL), 1),
         }

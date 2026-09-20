@@ -15,6 +15,9 @@ logs/
 # 访问统计 CSV（运行时生成；部署时通过 VIEWER_STATS_DIR 指向持久盘）
 viewer/stats/
 
+# 融合反解作业产物（运行时生成；FUSION_JOB_DIR 可重定向到持久盘）
+viewer/jobs/
+
 # DEM：仓库内置压缩子集（ldem_87s_5mpp_shackleton_50km_25m.tif，52 MB）
 # 随仓库分发，无需持久盘。其他大型 DEM（如完整 3.2 GB 版本）不随仓库分发，
 # 通过环境变量 DEM_PATH 指向外部存储。

@@ -247,6 +247,7 @@ function coastSolutions(geo, params) {
 
 function readParams() {
     const rpAlt = parseFloat(document.getElementById('parking-alt').value) || 200;
+    const imRaw = parseFloat(document.getElementById('im-target').value);
     return {
         rp: R_MEAN + rpAlt,
         tAscent: parseFloat(document.getElementById('ascent-time').value) || 800,
@@ -257,7 +258,9 @@ function readParams() {
         periTarget: parseFloat(document.getElementById('peri-target').value) || 150,
         lunarGrav: document.getElementById('lunar-grav').checked,
         biasSide: parseInt(document.getElementById('bias-side').value) || 0,
-        polarLock: document.getElementById('polar-lock').checked
+        polarLock: document.getElementById('polar-lock').checked,
+        targetIncDeg: Number.isFinite(imRaw) ? Math.max(0, Math.min(180, imRaw)) : 90,
+        rocketKey: document.getElementById('launch-vehicle').value
     };
 }
 
@@ -458,10 +461,15 @@ function solve3(J, b) {              // 3×3 Cramer
 }
 
 // 打靶主函数: 见文件头注释。params.biasSide ∈ {0 自动, ±1}; params.polarLock
+// 为 true 时追加第三约束 近月点轨道面与月轴夹角 = params.targetIncDeg
+// (90° = 极轨; 其他 0–180° 为任意目标倾角, >90° 为逆行), 控制量增加 TLI 速度偏置
 function lunarCorrection(geo, sol, params) {
     const vp0 = Math.sqrt(MU * (2 / params.rp - 1 / sol.a));
     const eph = buildEph(geo.jdL - 0.05, geo.jdA + 1.6);
     const rTarget = R_MOON + (params.periTarget || 200);
+    const targetInc = (params.targetIncDeg != null ? params.targetIncDeg : 90);
+    const cosT = Math.cos(targetInc * DEG);
+    const asinT = Math.asin(Math.max(-1, Math.min(1, cosT)));
     const tcLo = -sol.coast, tcHi = params.maxCoastSec - sol.coast;
     const F = (dAz, dtc, dvp = 0) => {
         const jdTLI = geo.jdL + (params.tAscent + sol.coast + dtc) / 86400;
@@ -474,7 +482,8 @@ function lunarCorrection(geo, sol, params) {
         const vr = [p.y[3]-vm[0], p.y[4]-vm[1], p.y[5]-vm[2]];
         const pol = V.dot(V.unit(V.cross(rr, vr)), MOON_POLE);
         return { f0: p.dPeri - rTarget, f1: (p.tPeri - tofSec) / 3600,
-                 pol, iM: Math.acos(Math.max(-1, Math.min(1, pol))) / DEG, p };
+                 f2: pol - cosT, pol,
+                 iM: Math.acos(Math.max(-1, Math.min(1, pol))) / DEG, p };
     };
     const nrm = c => Math.hypot(c.f0 / 80, c.f1);   // 80 km ≈ 1 h 等权
     const raw = F(0, 0);
@@ -553,22 +562,22 @@ function lunarCorrection(geo, sol, params) {
     const branches = cands.map(c => ({ side: c.side, dAz: c.dAz, iM: c.iM }));
 
     if (params.polarLock) {
-        // 3×3 抛光: (dAz, dtc, dvp) ↔ (高度, 时刻, 极轨面 n̂·p̂=0)
+        // 3×3 抛光: (dAz, dtc, dvp) ↔ (高度, 时刻, 捕获面倾角 i_M = 目标值)
         // 能量杠杆极陡 (贴远地点) → 小差分步 + 强钳制
         let hA = 0.05, hT = 10, hV = 1.5e-4;
         const nrm3 = c => Math.hypot(c.f0 / 80, c.f1,
-            Math.asin(Math.max(-1, Math.min(1, c.pol))) / DEG / 1.5);
+            (Math.asin(Math.max(-1, Math.min(1, c.pol))) - asinT) / DEG / 1.5);
         cur = F(dAz, dtc, dvp);
         for (let it = 0; it < 12; it++) {
             if (Math.abs(cur.f0) < 3 && Math.abs(cur.f1) < 0.02
-                && Math.abs(cur.pol) < 8.7e-4) { ok = true; break; }
+                && Math.abs(cur.f2) < 8.7e-4) { ok = true; break; }
             const fA = F(dAz + hA, dtc, dvp), fT = F(dAz, dtc + hT, dvp),
                   fV = F(dAz, dtc, dvp + hV);
             const J = [
                 [(fA.f0-cur.f0)/hA, (fT.f0-cur.f0)/hT, (fV.f0-cur.f0)/hV],
                 [(fA.f1-cur.f1)/hA, (fT.f1-cur.f1)/hT, (fV.f1-cur.f1)/hV],
-                [(fA.pol-cur.pol)/hA, (fT.pol-cur.pol)/hT, (fV.pol-cur.pol)/hV]];
-            const dx = solve3(J, [-cur.f0, -cur.f1, -cur.pol]);
+                [(fA.f2-cur.f2)/hA, (fT.f2-cur.f2)/hT, (fV.f2-cur.f2)/hV]];
+            const dx = solve3(J, [-cur.f0, -cur.f1, -cur.f2]);
             if (!dx) break;
             dx[0] = Math.max(-0.5, Math.min(0.5, dx[0]));
             dx[1] = Math.max(-120, Math.min(120, dx[1]));
@@ -586,7 +595,7 @@ function lunarCorrection(geo, sol, params) {
             hV = Math.max(5e-5, hV * 0.6);
         }
         if (!ok) ok = Math.abs(cur.f0) < 25 && Math.abs(cur.f1) < 0.15
-                      && Math.abs(cur.pol) < 0.02;
+                      && Math.abs(cur.f2) < 0.02;
     } else {
         // 2×2 抛光 (捕获面不约束)
         let hA = 0.05, hT = 12;
@@ -617,7 +626,7 @@ function lunarCorrection(geo, sol, params) {
         dAz = x[0]; dtc = x[1];
     }
     return { dAz, dtc, dvp, side: cA.side || 0, iM: cur.iM, branches,
-             polar: !!params.polarLock,
+             polar: !!params.polarLock, targetIncDeg: targetInc,
              periAlt: cur.p.dPeri - R_MOON, periDtH: cur.f1,
              rawAlt: raw.p.dPeri - R_MOON, rawDtH: raw.f1,
              converged: ok };
@@ -1329,7 +1338,8 @@ function updateResultPanel() {
     if (!selected) {
         ['r-launch','r-az','r-coast','r-tli','r-dnu','r-inc','r-raan','r-ecc',
          'r-apo','r-dv','r-c3','r-gap','r-arrival','r-mdec','r-mdist','r-minc',
-         'r-bias','r-dvp','r-im','r-peri','r-perit','r-raw']
+         'r-bias','r-dvp','r-im','r-peri','r-perit','r-raw',
+         'r-rocket','r-mavail','r-margin','r-width','r-window']
             .forEach(id => q(id).textContent = '--');
         return;
     }
@@ -1353,6 +1363,22 @@ function updateResultPanel() {
     q('r-dv').textContent = (sol.dv + (corrOn ? corr.dvp : 0)).toFixed(3) + ' km/s';
     q('r-c3').textContent = sol.c3.toFixed(2) + ' km²/s²';
     q('r-gap').textContent = gap.toFixed(2) + '°';
+
+    // 运载火箭能力（C3 → 可用运力/余量；Δv 偏航裕度 → 窗口宽度）
+    const rocket = ROCKETS[params.rocketKey] || ROCKETS.cz5;
+    const hParkAlt = parseFloat(document.getElementById('parking-alt').value) || 200;
+    const cap = rocketCapability(rocket, sol.c3, hParkAlt, geo.inc, site.lat);
+    q('r-rocket').textContent = rocket.name;
+    q('r-mavail').textContent = Math.round(cap.mAvail).toLocaleString() + ' kg @ C3 '
+        + sol.c3.toFixed(2);
+    q('r-margin').textContent = `${rocket.payloadKg.toLocaleString()} kg / `
+        + (cap.margin >= 0 ? '+' : '') + Math.round(cap.margin).toLocaleString() + ' kg';
+    q('r-margin').style.color = cap.margin >= 0 ? '' : '#f85149';
+    q('r-width').textContent = cap.widthFeasible
+        ? (cap.widthS / 60).toFixed(1) + ' min (Δv ' + rocket.dvMarginMps + ' m/s)'
+        : '射向不可达 (|φ| > i)';
+    q('r-window').textContent = rocket.windowNote;
+
     q('r-arrival').textContent = fmtJD(geo.jdA, site.tz) + ' ' + site.tzName;
     q('r-mdec').textContent = geo.moonDec.toFixed(2) + '°';
     q('r-mdist').textContent = Math.round(geo.moonDist).toLocaleString() + ' km';
@@ -1367,8 +1393,8 @@ function updateResultPanel() {
         q('r-dvp').textContent = `${sg(corr.dtc.toFixed(0))} s / `
             + `${sg((corr.dvp * 1000).toFixed(2))} m/s`;
         q('r-im').textContent = corr.polar
-            ? `${corr.iM.toFixed(1)}° (约束 90°)`
-            : `${corr.iM.toFixed(1)}° (未约束)`
+            ? `${corr.iM.toFixed(2)}° (目标 ${corr.targetIncDeg.toFixed(1)}°)`
+            : `${corr.iM.toFixed(2)}° (未约束)`
               + (other ? `; 另支 ${other.iM.toFixed(1)}°` : '');
         q('r-peri').textContent = `${Math.round(corr.periAlt)} km (标定点)`;
         q('r-perit').textContent = `${(corr.periDtH * 60).toFixed(0)} min`;
@@ -1672,7 +1698,7 @@ document.getElementById('transfer-time').addEventListener('input', e => {
 });
 document.getElementById('transfer-time').addEventListener('change', calcDay);
 ['launch-date','parking-alt','max-coast','ascent-time','ascent-arc',
- 'peri-target','lunar-grav','bias-side','polar-lock'].forEach(id =>
+ 'peri-target','lunar-grav','bias-side','polar-lock','im-target'].forEach(id =>
     document.getElementById(id).addEventListener('change', calcDay));
 
 document.getElementById('in-window').addEventListener('input', e => {
@@ -1719,3 +1745,452 @@ document.getElementById('launch-date').value = new Date().toISOString().slice(0,
 onResize();
 calcDay();
 requestAnimationFrame(animate);
+
+/* =====================================================================
+ * 融合反向求解（可选高精度工具） — 由 Flask 后端异步执行
+ * ---------------------------------------------------------------------
+ * 反解一次为 CPU 密集的长耗时计算（单日约 10–40 s、整月约 5–15 min），
+ * 前端只负责：参数吸附/校验 -> 确认对话框 -> 提交作业 -> 轮询结果。
+ * 后端接口（同源，viewer/server.py）：
+ *   GET    /coast_tool/api/fusion/config
+ *   POST   /coast_tool/api/fusion/jobs          (须 confirm=true)
+ *   GET    /coast_tool/api/fusion/jobs/<id>
+ *   DELETE /coast_tool/api/fusion/jobs/<id>
+ * ===================================================================== */
+(function () {
+    'use strict';
+
+    var btn = document.getElementById('btn-fusion');
+    if (!btn) return;
+    var cancelBtn = document.getElementById('btn-fusion-cancel');
+    var statusEl = document.getElementById('fusion-status');
+    var windowsEl = document.getElementById('fusion-windows');
+    var infoEl = document.getElementById('fusion-config-info');
+    var rangeEl = document.getElementById('fusion-range');
+    var modal = document.getElementById('fusion-modal');
+    var modalBody = document.getElementById('fusion-modal-body');
+    var modalOk = document.getElementById('fusion-modal-ok');
+    var modalCancel = document.getElementById('fusion-modal-cancel');
+
+    var cfg = null;
+    var pollTimer = null;
+    var jobId = null;
+
+    function setStatus(text, isError) {
+        statusEl.style.display = 'block';
+        statusEl.textContent = text;
+        statusEl.className = 'fusion-status' + (isError ? ' error' : '');
+    }
+
+    function addDays(dateStr, n) {
+        var d = new Date(dateStr + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + n);
+        return d.toISOString().slice(0, 10);
+    }
+
+    function readParams() {
+        var transferDays = parseFloat(document.getElementById('transfer-time').value) || 4.70;
+        var coastMin = parseFloat(document.getElementById('max-coast').value) || 20;
+        return {
+            site: document.getElementById('launch-site').value,
+            date: document.getElementById('launch-date').value,
+            tH: transferDays * 24,
+            coastS: coastMin * 60,
+            polar: document.getElementById('polar-lock').checked,
+            targetInc: parseFloat(document.getElementById('im-target').value) || 90,
+            azMin: parseFloat(document.getElementById('az-min').value) || 0,
+            azMax: parseFloat(document.getElementById('az-max').value) || 360
+        };
+    }
+
+    function snapT(tH) {
+        if (!cfg || !cfg.supported_T_h || !cfg.supported_T_h.length) return null;
+        var best = cfg.supported_T_h[0];
+        cfg.supported_T_h.forEach(function (s) {
+            if (Math.abs(s - tH) < Math.abs(best - tH)) best = s;
+        });
+        return Math.abs(best - tH) <= 0.35 ? best : null;
+    }
+
+    function refreshInfo() {
+        if (!cfg) { infoEl.textContent = '读取融合求解配置…'; return; }
+        if (!cfg.ready) {
+            infoEl.textContent = '融合求解不可用：缺少预生成家族表资产。';
+            btn.disabled = true;
+            return;
+        }
+        var p = readParams();
+        var t = snapT(p.tH);
+        var rangeText = rangeEl.value === 'month' ? '30 天' : '1 天';
+        var lines = [];
+        lines.push('站点 ' + p.site + ' · T ' + p.tH.toFixed(2) + ' h'
+            + (t === null ? '' : (Math.abs(t - p.tH) > 1e-9 ? ' → 吸附 ' + t.toFixed(2) + ' h' : '（命中表格）')));
+        lines.push('范围 ' + rangeText + ' · 滑行上限 ' + (p.coastS / 60).toFixed(0)
+            + ' min · i_m=90°（月球真极轴）');
+        if (!p.polar) {
+            lines.push('注意：融合反解需要启用捕获面倾角约束（勾选“约束捕获面倾角 i_M”）');
+            btn.disabled = true;
+        } else if (Math.abs(p.targetInc - 90) > 0.5) {
+            lines.push('注意：融合反解家族表仅支持 i_m = 90°（当前目标 '
+                + p.targetInc.toFixed(0) + '°）');
+            btn.disabled = true;
+        } else if (t === null) {
+            lines.push('注意：T 需在 ' + cfg.supported_T_h[0].toFixed(1) + '–'
+                + cfg.supported_T_h[cfg.supported_T_h.length - 1].toFixed(1)
+                + ' h 内（预生成表格），当前偏差过大');
+            btn.disabled = true;
+        } else {
+            btn.disabled = false;
+        }
+        infoEl.textContent = lines.join('\n');
+        infoEl.style.whiteSpace = 'pre-line';
+    }
+
+    function openConfirm() {
+        var p = readParams();
+        var t = snapT(p.tH);
+        if (!cfg || !cfg.ready || !p.polar || t === null) return;
+        var days = rangeEl.value === 'month' ? 30 : 1;
+        var end = addDays(p.date, days);
+        var est = Math.round(days * cfg.est_sec_per_day);
+        modalBody.textContent = '';
+        function row(label, value) {
+            var div = document.createElement('div');
+            var b = document.createElement('span');
+            b.style.color = '#8b949e';
+            b.textContent = label + '：';
+            div.appendChild(b);
+            div.appendChild(document.createTextNode(value));
+            modalBody.appendChild(div);
+        }
+        row('发射场', p.site);
+        row('日期范围（UTC）', p.date + ' → ' + end + '（' + days + ' 天）');
+        row('转移时间 T', t.toFixed(2) + ' h'
+            + (Math.abs(t - p.tH) > 1e-9 ? '（由 ' + p.tH.toFixed(2) + ' h 吸附）' : ''));
+        row('停泊滑行上限', (p.coastS / 60).toFixed(0) + ' min');
+        row('参考/约束', 'i_m = 90°（月球真极轴）、含太阳摄动、H_m = 200 km');
+        var warn = document.createElement('div');
+        warn.className = 'warn';
+        warn.style.marginTop = '8px';
+        warn.textContent = '高精度数值反解为 CPU 密集计算：预计 ' + est
+            + ' 秒（服务器负载高时可能更久）。运行期间本站其他页面可能变慢；'
+            + '作业在服务端执行，关闭本页不会中断。确认开始？';
+        modalBody.appendChild(warn);
+        modal.classList.add('open');
+    }
+
+    function closeConfirm() { modal.classList.remove('open'); }
+
+    function renderResult(result) {
+        windowsEl.textContent = '';
+        var p = readParams();
+        var summary = document.createElement('div');
+        summary.className = 'fusion-summary';
+        summary.textContent = result.config.start + ' → ' + result.config.end
+            + ' · T=' + result.config.T_h + ' h · ' + result.config.site
+            + ' · i_m=90° · ' + result.n_windows + ' 个窗口 · 用时 '
+            + result.elapsed_s + ' s · 拒绝 ' + result.rejects_total;
+        windowsEl.appendChild(summary);
+        (result.windows || []).forEach(function (w) {
+            var div = document.createElement('div');
+            div.className = 'fusion-window';
+            var time = document.createElement('div');
+            time.className = 'fw-time';
+            time.textContent = w.t_launch_utc.replace('T', ' ').replace('Z', '') + ' UTC';
+            var meta = document.createElement('div');
+            meta.className = 'fw-meta';
+            meta.textContent = w.family + ' / ' + (w.branch === 'ascending' ? '升支' : '降支')
+                + ' · 射向 ' + w.azimuth_deg.toFixed(1) + '°'
+                + ' · 滑行 ' + (w.coast_s / 60).toFixed(1) + ' min'
+                + ' · C3 ' + w.c3_km2s2.toFixed(2) + ' km²/s²'
+                + ' · vp ' + w.vp_kms.toFixed(3) + ' km/s';
+            div.appendChild(time);
+            div.appendChild(meta);
+            if (w.azimuth_deg >= p.azMin && w.azimuth_deg <= p.azMax) {
+                var tag = document.createElement('div');
+                tag.className = 'fw-tag';
+                tag.textContent = '落在当前射向走廊 ' + p.azMin + '°–' + p.azMax + '° 内';
+                div.appendChild(tag);
+            }
+            windowsEl.appendChild(div);
+        });
+        if (!result.windows || !result.windows.length) {
+            var empty = document.createElement('div');
+            empty.className = 'fusion-summary';
+            empty.textContent = '该范围内反向求解未找到窗口。';
+            windowsEl.appendChild(empty);
+        }
+    }
+
+    function poll() {
+        if (!jobId) return;
+        fetch('/coast_tool/api/fusion/jobs/' + jobId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (d.status === 'running') {
+                    setStatus('反向求解运行中… 已用 ' + Math.round(d.elapsed_s || 0)
+                        + ' s（可关闭页面，作业继续）');
+                    pollTimer = setTimeout(poll, 3000);
+                } else if (d.status === 'done') {
+                    jobId = null;
+                    cancelBtn.style.display = 'none';
+                    btn.disabled = false;
+                    setStatus('完成：' + d.result.n_windows + ' 个窗口，用时 ' + d.result.elapsed_s + ' s');
+                    renderResult(d.result);
+                } else if (d.status === 'cancelled') {
+                    jobId = null;
+                    cancelBtn.style.display = 'none';
+                    btn.disabled = false;
+                    setStatus('作业已取消');
+                } else if (d.status === 'unknown') {
+                    setStatus('作业状态暂不可知（服务可能重启），继续轮询…');
+                    pollTimer = setTimeout(poll, 5000);
+                } else {
+                    jobId = null;
+                    cancelBtn.style.display = 'none';
+                    btn.disabled = false;
+                    setStatus('作业失败：' + (d.error || '未知错误'), true);
+                }
+            })
+            .catch(function () {
+                setStatus('状态查询失败，稍后重试…', true);
+                pollTimer = setTimeout(poll, 5000);
+            });
+    }
+
+    function startJob() {
+        var p = readParams();
+        var t = snapT(p.tH);
+        if (!cfg || !cfg.ready || !p.polar || t === null) return;
+        var days = rangeEl.value === 'month' ? 30 : 1;
+        var end = addDays(p.date, days);
+        closeConfirm();
+        setStatus('提交作业…');
+        windowsEl.textContent = '';
+        btn.disabled = true;
+        fetch('/coast_tool/api/fusion/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start: p.date, end: end, T_h: t, site: p.site,
+                coast_max_s: p.coastS, confirm: true
+            })
+        }).then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; });
+        }).then(function (res) {
+            if (!res.ok) {
+                btn.disabled = false;
+                setStatus('无法启动：' + (res.data && res.data.error
+                    ? res.data.error : ('HTTP ' + res.status)), true);
+                return;
+            }
+            jobId = res.data.job_id;
+            cancelBtn.style.display = 'block';
+            setStatus('作业已提交（' + res.data.job_id + '），预计 '
+                + res.data.estimated_s + ' 秒…');
+            poll();
+        }).catch(function () {
+            btn.disabled = false;
+            setStatus('提交失败：网络错误', true);
+        });
+    }
+
+    btn.addEventListener('click', openConfirm);
+    modalOk.addEventListener('click', startJob);
+    modalCancel.addEventListener('click', closeConfirm);
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) closeConfirm();
+    });
+    cancelBtn.addEventListener('click', function () {
+        if (!jobId) return;
+        fetch('/coast_tool/api/fusion/jobs/' + jobId, { method: 'DELETE' })
+            .then(function () { setStatus('已请求取消作业…'); })
+            .catch(function () { setStatus('取消失败', true); });
+    });
+
+    ['launch-site', 'launch-date', 'transfer-time', 'max-coast', 'polar-lock',
+     'im-target', 'az-min', 'az-max'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', refreshInfo);
+    });
+    rangeEl.addEventListener('change', refreshInfo);
+
+    fetch('/coast_tool/api/fusion/config', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { cfg = d; refreshInfo(); })
+        .catch(function () { infoEl.textContent = '融合求解配置读取失败。'; });
+
+    // 供验证案例装载后刷新融合区（站点/T/倾角可能已变）
+    window.refreshFusionInfo = refreshInfo;
+})();
+
+/* =====================================================================
+ * 运载火箭预设 + 历史任务验证案例（rockets.js 提供数据/能力模型）
+ * ---------------------------------------------------------------------
+ * 左侧「验证案例」按钮：装载任务参数（文昌/日期/T/火箭）→ 右栏核对
+ * 工具计算 vs 实测/公开值（含已知误差，如 CE-5/6 滑行偏长）。
+ * 核对口径复现原 verify_scenario.py 的 Model B（二体，上升段 800 s/20°），
+ * 与四体修正/融合反解相互独立。
+ * ===================================================================== */
+(function () {
+    'use strict';
+
+    var vehicleSel = document.getElementById('launch-vehicle');
+    var rocketInfo = document.getElementById('rocket-info');
+    var casePanel = document.getElementById('case-panel');
+    var caseBody = document.getElementById('case-body');
+    var caseClose = document.getElementById('case-close');
+
+    function fmtUtc(iso) {
+        return iso.replace('T', ' ').replace('Z', '') + ' UTC';
+    }
+
+    function updateRocketInfo() {
+        var r = ROCKETS[vehicleSel.value];
+        if (!r || !rocketInfo) return;
+        rocketInfo.textContent = r.source + '\n' + r.windowNote
+            + '\n默认上升段假设 ' + r.ascentTime + ' s / ' + r.ascentArc + '°';
+        rocketInfo.style.whiteSpace = 'pre-line';
+    }
+
+    function applyRocketPreset(key) {
+        var r = ROCKETS[key];
+        if (!r) return;
+        document.getElementById('ascent-time').value = r.ascentTime;
+        document.getElementById('ascent-arc').value = r.ascentArc;
+        document.getElementById('parking-alt').value = r.parkPeri;
+        updateRocketInfo();
+    }
+
+    function applySiteDisplay(s) {
+        document.getElementById('site-lat').textContent =
+            Math.abs(s.lat).toFixed(3) + '°' + (s.lat >= 0 ? 'N' : 'S');
+        document.getElementById('site-lon').textContent =
+            Math.abs(s.lon).toFixed(3) + '°' + (s.lon >= 0 ? 'E' : 'W');
+        document.getElementById('az-min').value = s.azMin;
+        document.getElementById('az-max').value = s.azMax;
+        document.getElementById('site-corridor').textContent = s.azMin + '°–' + s.azMax + '°';
+    }
+
+    /* 在“实际发射时刻 + 实际转移时间”上按 Model B 求解（二体） */
+    function evaluateCase(c) {
+        var site = LAUNCH_SITES.wenchang;
+        var jdL = julianDateUTC(Date.parse(c.launchUtc));
+        var jdA = julianDateUTC(Date.parse(c.loiUtc));
+        var T = jdA - jdL;
+        var params = {
+            rp: R_MEAN + 200,
+            tAscent: 800, thAscent: 20,
+            maxCoastSec: 3 * 3600,
+            transferSec: T * 86400,
+            azMin: site.azMin, azMax: site.azMax
+        };
+        var geo = solveGeometry(jdL, site, T);
+        var sols = coastSolutions(geo, params);
+        return { site: site, jdL: jdL, jdA: jdA, T: T, geo: geo, sols: sols };
+    }
+
+    function row(k, v, cls) {
+        var div = document.createElement('div');
+        div.className = 'case-row';
+        var kEl = document.createElement('div');
+        kEl.className = 'k'; kEl.textContent = k;
+        var vEl = document.createElement('div');
+        vEl.className = 'v' + (cls ? ' ' + cls : '');
+        vEl.textContent = v;
+        div.appendChild(kEl); div.appendChild(vEl);
+        return div;
+    }
+
+    function renderCase(c, ev) {
+        caseBody.textContent = '';
+        var g = ev.geo, sol = ev.sols[0];
+        caseBody.appendChild(row('任务', c.name + ' · ' + ROCKETS[c.rocket].name));
+        caseBody.appendChild(row('实际发射', fmtUtc(c.launchUtc)));
+        caseBody.appendChild(row('实际近月', fmtUtc(c.loiUtc)
+            + '（T = ' + (ev.T * 24).toFixed(2) + ' h）'));
+        if (!sol) {
+            caseBody.appendChild(row('工具计算', '实际发射时刻无滑行闭合解', 'warn'));
+            return;
+        }
+        var inCorridor = g.az >= 90 && g.az <= 110;
+        caseBody.appendChild(row('工具@实际发射',
+            '射向 ' + g.az.toFixed(1) + '°' + (inCorridor ? '（走廊内）' : '（走廊外）')
+            + '\nLTO 倾角 ' + g.inc.toFixed(2) + '° · 滑行 ' + (sol.coast / 60).toFixed(1) + ' min'
+            + '\n远地点 ' + Math.round(sol.apoAlt).toLocaleString()
+            + ' km · ΔV ' + sol.dv.toFixed(3) + ' km/s'));
+        var measLines = [];
+        if (c.meas) {
+            measLines.push('倾角 ' + c.meas.inc.toFixed(3) + '°（' + c.meas.incSource + '）');
+        } else {
+            measLines.push('倾角 无实测（火箭末级 TLE 为月球借力后）');
+        }
+        measLines.push('滑行 ' + c.public.coastLabel);
+        measLines.push('LTO ' + c.public.lto + ' · ' + c.public.sep);
+        caseBody.appendChild(row('实测/公开', measLines.join('\n')));
+
+        var errLines = [];
+        var warn = false;
+        if (c.meas) {
+            var di = g.inc - c.meas.inc;
+            errLines.push('Δ倾角 ' + (di >= 0 ? '+' : '') + di.toFixed(2) + '°');
+            if (Math.abs(di) > 0.5) warn = true;
+        }
+        var dCoastMin = sol.coast / 60 - c.public.coastS / 60;
+        errLines.push('Δ滑行 ' + (dCoastMin >= 0 ? '+' : '') + dCoastMin.toFixed(1) + ' min'
+            + (dCoastMin > 2 ? '（偏长）' : (dCoastMin < -2 ? '（偏短）' : '（接近）')));
+        if (Math.abs(dCoastMin) > 2) warn = true;
+        caseBody.appendChild(row('误差', errLines.join('\n'), warn ? 'warn' : 'good'));
+
+        var note = document.createElement('div');
+        note.className = 'case-note';
+        note.textContent = '已知误差：' + c.knownError
+            + '\n核对口径：验证脚本假设（上升段 800 s/20°、近地点 200 km、二体 Model B），'
+            + '不含四体修正与捕获面倾角约束。';
+        caseBody.appendChild(note);
+    }
+
+    function loadCase(key) {
+        var c = VERIFY_CASES[key];
+        if (!c) return;
+        document.querySelectorAll('.case-btn').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.case === key);
+        });
+        vehicleSel.value = c.rocket;
+        applyRocketPreset(c.rocket);
+        var site = LAUNCH_SITES.wenchang;
+        document.getElementById('launch-site').value = 'wenchang';
+        applySiteDisplay(site);
+        document.getElementById('launch-date').value = c.launchUtc.slice(0, 10);
+        var Td = c.transferH / 24;
+        document.getElementById('transfer-time').value = Td.toFixed(2);
+        document.getElementById('transfer-time-value').textContent =
+            Td.toFixed(2) + ' 天 (' + c.transferH.toFixed(1) + ' h)';
+        // 复现验证脚本假设
+        document.getElementById('ascent-time').value = 800;
+        document.getElementById('ascent-arc').value = 20;
+        document.getElementById('polar-lock').checked = true;
+        document.getElementById('im-target').value = 90;
+        casePanel.style.display = '';
+        renderCase(c, evaluateCase(c));
+        calcDay();
+        if (window.refreshFusionInfo) window.refreshFusionInfo();
+    }
+
+    vehicleSel.addEventListener('change', function () {
+        applyRocketPreset(vehicleSel.value);
+        calcDay();
+    });
+    document.querySelectorAll('.case-btn').forEach(function (b) {
+        b.addEventListener('click', function () { loadCase(b.dataset.case); });
+    });
+    if (caseClose) {
+        caseClose.addEventListener('click', function () {
+            casePanel.style.display = 'none';
+            document.querySelectorAll('.case-btn').forEach(function (b) {
+                b.classList.remove('active');
+            });
+        });
+    }
+    updateRocketInfo();
+})();

@@ -179,6 +179,70 @@ details.adv summary {
     border: 1px solid #30363d; border-radius: 6px; white-space: nowrap;
 }
 #header .back-home:hover { color: #58a6ff; border-color: #58a6ff; }
+
+/* 融合反向求解（可选高精度工具） */
+#fusion-box { margin-bottom: 10px; }
+.fusion-note { font-size: 10.5px; color: #8b949e; line-height: 1.7; margin-bottom: 8px; }
+.fusion-note b { color: #e3b341; }
+.fusion-status { font-size: 11px; color: #58a6ff; margin-top: 6px; line-height: 1.6; }
+.fusion-status.error { color: #f85149; }
+.fusion-summary { font-size: 10.5px; color: #8b949e; margin: 8px 0 2px; line-height: 1.6; }
+.fusion-window {
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 6px 8px; margin-top: 6px; font-size: 11px; line-height: 1.6;
+}
+.fusion-window .fw-time { color: #7ee787; font-weight: 600; font-family: ui-monospace, Menlo, monospace; }
+.fusion-window .fw-meta { color: #8b949e; }
+.fusion-window .fw-tag { color: #e3b341; }
+
+/* 验证案例（历史任务） */
+.case-buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.case-btn {
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; padding: 7px 4px; cursor: pointer; text-align: center;
+    font-size: 11px; line-height: 1.5; transition: border-color .15s, background .15s;
+}
+.case-btn b { display: block; color: #e0e0e0; font-size: 11.5px; font-weight: 600; }
+.case-btn span { color: #8b949e; font-size: 10px; }
+.case-btn:hover { border-color: #58a6ff; background: #1b2430; }
+.case-btn.active { border-color: #58a6ff; background: rgba(88, 166, 255, 0.12); }
+.case-hint { font-size: 10.5px; color: #8b949e; margin-top: 6px; line-height: 1.7; }
+#case-panel { margin-bottom: 10px; }
+#case-panel .panel-title { margin-top: 0; }
+#case-close {
+    float: right; background: transparent; border: 1px solid #30363d;
+    color: #8b949e; border-radius: 4px; font-size: 10px; padding: 0 6px;
+    cursor: pointer;
+}
+#case-close:hover { color: #f0f0f0; border-color: #58a6ff; }
+.case-body { font-size: 11px; line-height: 1.8; color: #c9d1d9; }
+.case-body .case-row { display: flex; gap: 6px; margin-top: 3px; }
+.case-body .case-row .k { color: #8b949e; flex: 0 0 84px; }
+.case-body .case-row .v { flex: 1; white-space: pre-line; }
+.case-body .case-row .v.good { color: #7ee787; }
+.case-body .case-row .v.warn { color: #e3b341; }
+.case-body .case-note {
+    margin-top: 8px; padding: 6px 8px; border-radius: 6px;
+    background: rgba(227, 179, 65, 0.08); border: 1px solid rgba(227, 179, 65, 0.3);
+    color: #e3b341; font-size: 10.5px; line-height: 1.7; white-space: pre-line;
+}
+
+/* 确认对话框 */
+.modal-overlay {
+    position: fixed; inset: 0; background: rgba(5, 8, 12, 0.72);
+    display: none; align-items: center; justify-content: center; z-index: 200;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+    width: min(470px, 92vw); background: #0d1117; border: 1px solid #30363d;
+    border-radius: 10px; padding: 18px; color: #e0e0e0;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+.modal h3 { margin: 0 0 10px; font-size: 15px; color: #58a6ff; }
+.modal .modal-body { font-size: 12px; line-height: 1.9; color: #c9d1d9; }
+.modal .modal-body .warn { color: #e3b341; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+.modal-actions .btn { flex: 1; margin-top: 0; }
 </style>
 </head>
 <body>
@@ -187,7 +251,7 @@ details.adv summary {
 
 <div id="header">
     <h1>月球转移发射窗口计算器</h1>
-    <span class="subtitle">停泊轨道滑行方案 · 变射向 + 变滑行时间 (Chang'e-5 style parking-orbit coast TLI)</span>
+    <span class="subtitle">停泊轨道滑行方案 · 变射向 + 变滑行时间（经嫦娥五号/六号、鹊桥二号实测验证）</span>
     <a class="back-home" href="/">← 返回首页</a>
 </div>
 
@@ -206,6 +270,15 @@ details.adv summary {
             <div>纬度 <span id="site-lat">19.614°N</span> &nbsp; 经度 <span id="site-lon">110.951°E</span></div>
             <div>射向走廊(落区约束) <span id="site-corridor">90°–110°</span></div>
         </div>
+    </div>
+
+    <div class="control-group">
+        <label>运载火箭 Launch Vehicle</label>
+        <select id="launch-vehicle">
+            <option value="cz5">长征五号 CZ-5</option>
+            <option value="cz8">长征八号 CZ-8</option>
+        </select>
+        <div class="site-info" id="rocket-info"></div>
     </div>
 
     <div class="control-group">
@@ -254,7 +327,11 @@ details.adv summary {
             </div>
             <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
                 <input type="checkbox" id="polar-lock" checked>
-                <label for="polar-lock" style="margin:0" title="加第三约束 近月点轨道面⊥月轴 (i_M=90°), 控制量增加 TLI 速度偏置 — 与全数值参考解同构">极轨捕获 i=90°</label>
+                <label for="polar-lock" style="margin:0" title="加第三约束 近月点轨道面与月轴夹角 = 目标倾角 i_M, 控制量增加 TLI 速度偏置 — 与全数值参考解同构">约束捕获面倾角 i_M</label>
+            </div>
+            <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+                <label for="im-target" style="margin:0" title="目标环月轨道倾角（0–180°；90°=极轨，>90°=逆行轨道）">目标 i_M (°)</label>
+                <input type="number" id="im-target" value="90" min="0" max="180" step="1" style="width:72px">
             </div>
         </div>
         <div>
@@ -276,6 +353,23 @@ details.adv summary {
             </div>
         </div>
     </details>
+
+    <div class="panel-title" style="margin-top:14px">验证案例（历史任务）</div>
+    <div class="case-buttons">
+        <button class="case-btn" data-case="ce5" type="button">
+            <b>嫦娥五号</b><span>CZ-5 · 2020-11-23</span>
+        </button>
+        <button class="case-btn" data-case="qq2" type="button">
+            <b>鹊桥二号</b><span>CZ-8 · 2024-03-20</span>
+        </button>
+        <button class="case-btn" data-case="ce6" type="button">
+            <b>嫦娥六号</b><span>CZ-5 · 2024-05-03</span>
+        </button>
+    </div>
+    <div class="case-hint">
+        装载任务参数（文昌/日期/T/火箭）并在右栏核对
+        工具计算 vs 实测/公开值（含已知误差）
+    </div>
 
     <button class="btn btn-green" id="btn-calc">计算当日窗口</button>
     <button class="btn btn-blue" id="btn-month">扫描 30 天窗口</button>
@@ -341,6 +435,14 @@ details.adv summary {
 
 <!-- ===== 右栏: 结果 ===== -->
 <div id="info-panel">
+    <div id="case-panel" style="display:none">
+        <div class="panel-title">
+            验证案例核对
+            <button id="case-close" type="button" title="关闭">✕</button>
+        </div>
+        <div class="case-body" id="case-body"></div>
+    </div>
+
     <div class="panel-title">当日发射窗口 <span style="color:#8b949e;text-transform:none">(UTC+8)</span></div>
     <div id="window-list" class="window-list"><div class="no-window">点击"计算当日窗口"</div></div>
     <div class="control-group in-window-slider" id="in-window-box" style="display:none">
@@ -379,6 +481,13 @@ details.adv summary {
     <div class="info-row"><span class="label">C3</span><span class="value" id="r-c3">--</span></div>
     <div class="info-row"><span class="label">LTO面-白道面夹角</span><span class="value" id="r-gap">--</span></div>
 
+    <div class="panel-title">运载火箭能力</div>
+    <div class="info-row"><span class="label">火箭</span><span class="value" id="r-rocket">--</span></div>
+    <div class="info-row"><span class="label">可用运力 @C3</span><span class="value" id="r-mavail">--</span></div>
+    <div class="info-row"><span class="label">载荷 / 余量</span><span class="value" id="r-margin">--</span></div>
+    <div class="info-row"><span class="label">偏航裕度窗口宽度</span><span class="value" id="r-width">--</span></div>
+    <div class="info-row"><span class="label">公开窗口量级</span><span class="value" id="r-window">--</span></div>
+
     <div class="panel-title">月球引力修正 (四体)</div>
     <div class="info-row"><span class="label">射向偏置 ΔAz</span><span class="value highlight" id="r-bias">--</span></div>
     <div class="info-row"><span class="label">滑行/ΔV 偏置</span><span class="value" id="r-dvp">--</span></div>
@@ -399,13 +508,47 @@ details.adv summary {
     <div class="info-row"><span class="label">月球赤纬@到达</span><span class="value" id="r-mdec">--</span></div>
     <div class="info-row"><span class="label">月球距离@到达</span><span class="value" id="r-mdist">--</span></div>
     <div class="info-row"><span class="label">白道倾角(赤道)</span><span class="value" id="r-minc">--</span></div>
+
+    <div class="panel-title">融合反向求解 · 高精度（可选）</div>
+    <div id="fusion-box">
+        <div class="fusion-note">
+            独立于上方滑行方案的高精度数值反解（融合 L6 家族表 + 口袋搜索，
+            含太阳摄动、月球真极轴参考与极轨捕获约束）。单日约 10–40 秒、
+            整月约 5–15 分钟，<b>须确认后运行</b>；作业在服务端执行，
+            关闭本页不会中断；重新打开后若旧作业仍在运行，新作业会提示稍后再试。
+        </div>
+        <div class="control-group">
+            <label>扫描范围</label>
+            <select id="fusion-range">
+                <option value="day">当日（1 天）</option>
+                <option value="month">30 天</option>
+            </select>
+        </div>
+        <div class="site-info" id="fusion-config-info">读取配置…</div>
+        <button class="btn btn-blue" id="btn-fusion" disabled>运行反向求解…</button>
+        <button class="btn" id="btn-fusion-cancel" style="display:none;background:#30363d">取消作业</button>
+        <div id="fusion-status" class="fusion-status" style="display:none"></div>
+        <div id="fusion-windows"></div>
+    </div>
 </div>
 
+</div>
+
+<div class="modal-overlay" id="fusion-modal">
+    <div class="modal">
+        <h3>确认运行融合反向求解？</h3>
+        <div class="modal-body" id="fusion-modal-body"></div>
+        <div class="modal-actions">
+            <button class="btn" id="fusion-modal-cancel" style="background:#30363d">取消</button>
+            <button class="btn btn-green" id="fusion-modal-ok">确认运行</button>
+        </div>
+    </div>
 </div>
 
 <script src="vendor/three.min.js"></script>
 <script src="vendor/OrbitControls.js"></script>
 
+<script src="rockets.js"></script>
 <script src="app.js"></script>
 
 

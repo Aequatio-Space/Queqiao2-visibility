@@ -89,6 +89,13 @@ Observatory"*；其他行星/月球纹理为程序生成（Canvas 绘制），�
    光学定轨密切根数（TLE）.
    - 引用内容：`coast_tool/README.md` 中三次历史任务实测倾角的比对来源；
      原始 TLE 文件未随本仓库分发（仅引用数值事实）。
+6. **胡浩, 裴照宇, 李春来 等.** 无人月球采样返回总体设计——嫦娥五号任务[J].
+   中国科学: 技术科学, 2021. doi:10.1360/sst-2021-0155.
+   - 引用内容：CZ-5 二级滑行时间 1000 s 时地月转移轨道运力 ≥8200 kg、
+     探测器质量 8200 kg、发射窗口 50 min/天与"窄窗口多轨道"方案。
+7. **CNSA / 中国航天科技集团公开发射报道**（鹊桥二号 / CZ-8）.
+   - 引用内容：CZ-8 地月转移轨道运力不低于 1.3 t；鹊桥二号质量 1.2 t、
+     飞行 24 min 后星箭分离、200 × 42 万 km LTO；仅引用公开事实与数值。
 
 > 备注：完整引用块见
 > `analysis/elevation_video/queqiao_relay.py` 中的 `REFERENCES`。
@@ -131,9 +138,10 @@ LICENSE 文件为准。前端 vendored 的 three.js / GLTFLoader / OrbitControls
 
 | 组件 | 来源 | 说明 |
 | --- | --- | --- |
-| `launch_window/` | AgentMoons 项目 `launch_window` 包（v0.6.0） | 仅保留 Yang 论文轨道求解子集（orbits_xyz / tli_solver / mep_frame / geometry）；SPICE 内核路径改指本仓库 `core/environment/data/` |
+| `launch_window/` | AgentMoons 项目 `launch_window` 包（v0.6.0） | 轨道链路（orbits_xyz / tli_solver / mep_frame / geometry）与融合窗口引擎（fusion / launch_epoch / perigee_match / scan_im / r1s_scan / launcher / lambert_window / lambert / month_accounting）；SPICE 内核路径改指本仓库 `core/environment/data/`，硬编码本地路径改为仓库内可配置默认路径 |
 | `coast_tool/` | lunarlaunchwindow 项目 `coast_tool/`（MIT, Copyright (c) 2026 Zhuoxiao） | 内联脚本已外置为 `app.js` 以符合 CSP；原始 MIT 许可文本见 `coast_tool/LICENSE`；`启动.command` / `node_modules` 等未移植 |
 | `viewer/data/yang_orbits_xyz.json` | 由本仓库 `scripts/build_yang_orbits.py` 调用 `launch_window` 离线生成 | 论文默认到达历元（2026-08-24T00:00:00Z）的 24 条轨道 |
+| `viewer/data/fusion_tables/` | 由 `launch_window.scan_im.run_scan` 离线生成的 L5 家族表 | T=112.0–113.0 h 与 112.61 h、i_m=90°、H_m=200 km、含太阳摄动；供 `/coast_tool` 可选反解使用 |
 
 ---
 
