@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>轨道六根数交互演示 — 开普勒二体</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --fg: #e8ecf3;
+    --accent: #4ec9ff;
+    --accent2: #ffd166;
+    --good: #7dffa8;
+    --warn: #ffa552;
+    --bad: #ff6b6b;
+    --grid: rgba(255,255,255,0.08);
+    --panel-bg: rgba(8, 12, 22, 0.82);
+    --panel-border: rgba(78, 201, 255, 0.25);
+  }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+               background: var(--bg); color: var(--fg);
+               font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif; }
+  #stage { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  /* ── 顶栏 ─────────────────────────────────────────── */
+  #status {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, var(--panel-bg) 0%, rgba(0,0,0,0) 100%);
+    font-size: 13px; line-height: 1.45;
+    pointer-events: none; z-index: 10;
+  }
+  #status h1 { margin: 0 0 2px 0; font-size: 17px; color: var(--accent); font-weight: 600; }
+  #status p { margin: 0; opacity: 0.72; }
+  #status-note { color: var(--warn); }
+
+  /* ── UTC 时钟（右上） ───────────────────────────── */
+  #utc-clock {
+    position: absolute; top: 10px; right: 14px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    z-index: 11;
+    text-align: right;
+    font-size: 12px;
+    pointer-events: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #utc-clock .utc-sim { font-size: 14px; font-weight: 600; color: var(--accent);
+                        font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #utc-clock .utc-real { margin-top: 2px; font-size: 11px; opacity: 0.65;
+                         font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #utc-clock button {
+    margin-left: 6px; padding: 0 6px; font-size: 12px; line-height: 1.4;
+    background: rgba(78,201,255,0.12); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 4px; cursor: pointer;
+  }
+  #utc-clock button:hover { background: rgba(78,201,255,0.28); }
+
+  /* ── 左侧控制面板 ─────────────────────────────────── */
+  #controls {
+    position: absolute; top: 64px; left: 12px;
+    width: 308px; max-height: calc(100vh - 150px);
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 12px;
+    overflow-y: auto;
+    z-index: 10;
+    font-size: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #controls h2 { margin: 14px 0 6px 0; font-size: 13px; color: var(--accent);
+                 border-bottom: 1px solid var(--panel-border); padding-bottom: 4px; }
+  #controls h2:first-child { margin-top: 0; }
+  #controls::-webkit-scrollbar { width: 8px; }
+  #controls::-webkit-scrollbar-thumb { background: rgba(78,201,255,0.25); border-radius: 4px; }
+
+  .el-row { margin: 7px 0 10px 0; }
+  .el-row input:disabled { opacity: 0.4; cursor: not-allowed; }
+  .el-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
+  .el-name { color: var(--fg); opacity: 0.9; }
+  .el-name b { color: var(--accent); font-weight: 600; }
+  .el-val { display: flex; align-items: baseline; gap: 4px; }
+  .el-val input {
+    width: 86px; background: rgba(78,201,255,0.08); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 4px;
+    font: inherit; text-align: right; padding: 2px 5px;
+  }
+  .el-val input:focus { outline: 1px solid var(--accent); }
+  .el-val input.invalid { border-color: var(--bad); color: var(--bad); }
+  .el-val .unit { opacity: 0.6; font-size: 11px; min-width: 22px; }
+  .el-row input[type="range"] {
+    width: 100%; margin: 0; accent-color: var(--accent); cursor: pointer;
+  }
+
+  #derived { background: rgba(78,201,255,0.06); border-radius: 6px;
+             padding: 7px 9px; line-height: 1.7; margin-top: 2px; }
+  #derived .dline { display: flex; justify-content: space-between; }
+  #derived .dline span:last-child { font-variant-numeric: tabular-nums; }
+  .warnbox { margin-top: 5px; padding: 5px 8px; border-radius: 5px; font-size: 11.5px; display: none; }
+  .warnbox.show { display: block; }
+  .warnbox.atmo { background: rgba(255,107,107,0.14); color: var(--bad); border: 1px solid rgba(255,107,107,0.4); }
+  .warnbox.touch { background: rgba(255,165,82,0.12); color: var(--warn); border: 1px solid rgba(255,165,82,0.4); }
+  .hintbox { margin-top: 4px; font-size: 11px; opacity: 0.65; display: none; }
+  .hintbox.show { display: block; }
+
+  #phase-box { background: rgba(78,201,255,0.06); border-radius: 6px; padding: 7px 9px;
+               font-variant-numeric: tabular-nums; line-height: 1.75; }
+  #phase-box .mono { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  #phase-box .chain-arrow { color: var(--accent); }
+  /* 摄动 90 d 进度条：色条对应拖尾未来演化色（青→橙→红），
+     --prog (0..1) = tNow/window，左亮右暗 + 白色游标标记当前时刻 */
+  #ph-prog {
+    --prog: 0;
+    position: relative; height: 8px; margin-top: 5px;
+    border-radius: 4px; overflow: hidden;
+    background: rgba(0,0,0,0.35);
+    cursor: ew-resize; touch-action: none; /* 可拖动 scrub */
+  }
+  #ph-prog .prog-grad {
+    position: absolute; inset: 0;
+    background: linear-gradient(to right, #4ec9ff 0%, #ffa552 50%, #ff6b6b 100%);
+  }
+  #ph-prog .prog-dim {
+    position: absolute; top: 0; bottom: 0;
+    left: calc(var(--prog) * 100%); right: 0;
+    background: rgba(0,0,0,0.62);
+    transition: left 0.08s linear;
+  }
+  #ph-prog .prog-marker {
+    position: absolute; top: -1px; bottom: -1px; width: 2px;
+    left: calc(var(--prog) * 100%);
+    background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.85);
+    transform: translateX(-1px);
+    transition: left 0.08s linear;
+  }
+  /* ── 展开/隐藏控制面板（全局视角） ─────────────────────────── */
+  /* panel-hidden：隐藏左侧控制面板、右侧输出卡片、顶部说明、UTC 时钟，
+     只留顶部标题栏 + 左下角浮动「播放+进度条」条，画面进入全局视角 */
+  body.panel-hidden #controls,
+  body.panel-hidden #outputs,
+  body.panel-hidden #utc-clock,
+  body.panel-hidden #status-body { display: none; }
+  /* 顶部 toggle 选项卡样式与 body-tab 一致 */
+  #btn-panel-toggle { pointer-events: auto; }
+  /* 左下角浮动迷你控制条：仅播放/暂停 + 进度条 */
+  #mini-ctrl {
+    position: absolute; left: 12px; bottom: 12px; z-index: 12;
+    display: none; align-items: center; gap: 10px;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 8px 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    width: min(520px, calc(100vw - 24px));
+  }
+  body.panel-hidden #mini-ctrl { display: flex; }
+  #mini-ctrl button {
+    flex: 0 0 auto; background: rgba(78,201,255,0.12); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 5px;
+    cursor: pointer; font: inherit; padding: 4px 12px; white-space: nowrap;
+  }
+  #mini-ctrl button:hover { background: rgba(78,201,255,0.28); }
+  #mini-ctrl button.active { background: rgba(78,201,255,0.35); border-color: var(--accent); }
+  /* 进度条移入迷你条后占满剩余宽度（原 #ph-prog 样式不变，仅容器自适应） */
+  #mini-ctrl #ph-prog { flex: 1 1 auto; margin-top: 0; height: 10px; }
+
+  .btnrow { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  button.ctl {
+    background: rgba(78,201,255,0.12); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 5px;
+    cursor: pointer; font: inherit; padding: 4px 10px;
+  }
+  button.ctl:hover { background: rgba(78,201,255,0.28); }
+  button.ctl.active { background: rgba(78,201,255,0.35); border-color: var(--accent); }
+  select.ctl {
+    background: rgba(10,16,30,0.9); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 5px;
+    font: inherit; padding: 3px 6px; max-width: 180px;
+  }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chk-row { display: flex; align-items: center; gap: 6px; padding: 3px 2px;
+             cursor: pointer; user-select: none; border-radius: 4px; }
+  .chk-row:hover { background: rgba(255,255,255,0.05); }
+  .chk-row input { margin: 0; accent-color: var(--accent); }
+  .prop-note { font-size: 11px; opacity: 0.65; margin-top: 4px; line-height: 1.5; }
+
+  /* ── 右侧输出卡片 ─────────────────────────────────── */
+  #outputs {
+    position: absolute; top: 64px; right: 12px;
+    width: 342px; max-height: calc(100vh - 96px);
+    overflow-y: auto; z-index: 10;
+    display: flex; flex-direction: column; gap: 8px;
+    font-size: 12px;
+  }
+  #outputs::-webkit-scrollbar { width: 8px; }
+  #outputs::-webkit-scrollbar-thumb { background: rgba(78,201,255,0.25); border-radius: 4px; }
+  .card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 9px 11px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.45);
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .card-head .title { color: var(--accent); font-weight: 600; font-size: 12.5px; }
+  .card-head button {
+    background: none; border: 1px solid var(--panel-border); color: var(--fg);
+    border-radius: 4px; cursor: pointer; font-size: 11px; padding: 1px 8px;
+  }
+  .card-head button:hover { background: rgba(78,201,255,0.2); }
+  .card-head button.on { background: rgba(78,201,255,0.3); border-color: var(--accent); }
+  .big { font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.5; }
+  .sub { opacity: 0.72; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .deriv { margin-top: 7px; border-top: 1px dashed var(--panel-border); padding-top: 6px;
+           display: none; }
+  .deriv.show { display: block; }
+  .deriv .step { margin: 5px 0; line-height: 1.65; }
+  .deriv .step b { color: var(--accent2); font-weight: 600; }
+  .deriv .step .res { color: var(--good); font-weight: 600; }
+  .deriv .note { margin-top: 6px; font-size: 11px; opacity: 0.6; line-height: 1.5; }
+  .deriv sub { font-size: 9px; }
+  /* ── 符号速查（输出区顶部） ───────────────────────── */
+  #sym-legend {
+    border-color: rgba(78, 201, 255, 0.5);
+    background: linear-gradient(180deg, rgba(78, 201, 255, 0.10), var(--panel-bg) 55%);
+  }
+  #sym-legend.collapsed .sym-body { display: none; }
+  .sym-cap { color: var(--accent2); font-size: 10.5px; font-weight: 600; margin: 6px 0 2px; }
+  .sym-body .sym-cap:first-child { margin-top: 2px; }
+  .sym-row { display: flex; gap: 8px; line-height: 1.5; margin: 2px 0; }
+  .sym-row .sym { flex: 0 0 104px; color: var(--accent); font-weight: 600;
+                  font-variant-numeric: tabular-nums; }
+  .sym-row .sym sub, .sym-row .desc sub { font-size: 9px; }
+  .sym-row .desc { flex: 1; opacity: 0.85; }
+  table.mtx { border-collapse: collapse; margin: 4px 0 2px 0; }
+  table.mtx td {
+    font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+    padding: 1px 8px; text-align: right; opacity: 0.9;
+  }
+
+  /* ── 左下角自检徽标 ───────────────────────────────── */
+  #selftest {
+    position: absolute; left: 12px; bottom: 12px;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 5px 10px;
+    font-size: 11.5px; z-index: 11; cursor: pointer;
+    font-variant-numeric: tabular-nums;
+    max-width: 46vw;
+  }
+  #selftest.ok { color: var(--good); border-color: rgba(125,255,168,0.4); }
+  #selftest.bad { color: var(--bad); border-color: rgba(255,107,107,0.4); }
+  #selftest-detail {
+    position: absolute; left: 12px; bottom: 44px;
+    background: var(--panel-bg); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 8px 12px;
+    font: 11px ui-monospace, Menlo, monospace;
+    z-index: 11; display: none; max-height: 40vh; overflow-y: auto;
+    white-space: pre-wrap; max-width: 46vw; line-height: 1.6;
+  }
+  #selftest-detail.show { display: block; }
+
+  /* ── 摄动 90 d 演化卡片 ─────────────────────────────── */
+  .chart-wrap { margin-top: 6px; }
+  .chart-lbl { font-size: 11px; opacity: 0.7; margin-bottom: 2px; }
+  .chart-lbl b { color: var(--accent); font-weight: 600; }
+  canvas.chart {
+    width: 100%; height: 72px;
+    background: rgba(0,0,0,0.25);
+    border-radius: 4px;
+    display: block;
+  }
+  #osc-table {
+    width: 100%; border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    margin-top: 7px; font-size: 11.5px;
+  }
+  #osc-table th, #osc-table td {
+    text-align: right; padding: 2px 4px;
+    border-bottom: 1px solid rgba(78,201,255,0.08);
+  }
+  #osc-table th { color: var(--accent); font-weight: 600; opacity: 0.85; }
+  #osc-table th:first-child, #osc-table td:first-child { text-align: left; opacity: 0.7; }
+  #force-line {
+    margin-top: 7px; padding-top: 6px;
+    border-top: 1px dashed var(--panel-border);
+    font: 10.5px ui-monospace, Menlo, monospace;
+    line-height: 1.8; color: var(--fg); opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+  }
+  #force-line .fz { color: var(--accent2); }
+  #force-line .fd { color: var(--bad); }
+  #force-line .fs { color: var(--accent); }
+  .param-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 3px 2px; gap: 8px;
+  }
+  .param-row label { flex: 1; font-size: 11.5px; opacity: 0.85; }
+  .param-row input[type="number"] {
+    width: 72px; background: rgba(78,201,255,0.08); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 4px;
+    font: inherit; text-align: right; padding: 2px 4px;
+  }
+  .param-row input[type="number"]:focus { outline: 1px solid var(--accent); }
+  .pert-busy {
+    display: inline-block; margin-left: 6px;
+    color: var(--warn); font-size: 11px;
+  }
+
+  /* ── 表头行（标题 + 居中选项卡） ── */
+  #status-head { position: relative; display: flex; align-items: center; min-height: 30px; }
+  #status-head h1 { margin: 0; }
+  #body-tabs {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: flex; gap: 6px; pointer-events: auto; z-index: 20;
+  }
+  .body-tab {
+    background: rgba(8, 12, 22, 0.92); color: var(--fg);
+    border: 1px solid var(--panel-border); border-radius: 6px;
+    cursor: pointer; font: inherit; font-size: 13px; padding: 4px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+  .body-tab:hover { background: rgba(78,201,255,0.22); }
+  .body-tab.active { background: rgba(78,201,255,0.35); border-color: var(--accent); color: var(--accent); }
+
+  /* ── 月球预设区 ── */
+  .moon-preset {
+    display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
+  }
+  .moon-preset button.ctl { text-align: left; padding: 4px 10px; }
+  .moon-preset button.ctl.active { border-color: var(--accent2); }
+  .mp-desc { font-size: 11px; opacity: 0.7; line-height: 1.5; margin-top: 2px;
+             padding: 5px 8px; background: rgba(255,209,102,0.07); border-radius: 5px; }
+  .mp-params { margin-top: 4px; }
+  .mp-params .param-row { display: flex; justify-content: space-between; align-items: center;
+                          gap: 8px; margin: 3px 0; }
+  .mp-params input[type="range"] { flex: 1; accent-color: var(--accent2); cursor: pointer; }
+  .mp-params .mp-val { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums;
+                       font-size: 11.5px; color: var(--accent2); }
+  .mp-frozen { font-size: 11px; opacity: 0.75; padding: 4px 8px;
+               background: rgba(125,255,168,0.06); border-radius: 5px; margin-top: 3px; }
+
+/* 轨道修正启用/关闭时 3D 画面中央 toast */
+#sk-toast { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  background: rgba(15, 220, 120, 0.92); color: #004D26;
+  padding: 14px 24px; border-radius: 12px; z-index: 20;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25); text-align: center; min-width: 220px;
+  animation: skToastIn .25s ease-out; }
+#sk-toast[hidden] { display: none; }
+#sk-toast.sk-off { background: rgba(255, 88, 88, 0.9); color: #fff; }
+.sk-tx { font-weight: 600; font-size: 15px; }
+.sk-sub { font-size: 12px; opacity: .85; margin-top: 4px; }
+@keyframes skToastIn { from { opacity: 0; transform: translate(-50%,-55%); } to { opacity: 1; transform: translate(-50%,-50%); } }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="sk-toast" hidden>
+  <div class="sk-tx"></div>
+  <div class="sk-sub"></div>
+</div>
+
+<div id="status">
+  <div id="status-head">
+    <h1>轨道六根数交互演示</h1>
+    <div id="body-tabs">
+      <button class="body-tab active" id="tab-earth">🌍 地球</button>
+      <button class="body-tab" id="tab-moon">🌙 月球</button>
+      <button class="body-tab" id="btn-panel-toggle" title="展开/隐藏控制面板：隐藏左右控制与输出卡片，只留播放/暂停+进度条于左下角，进入全局视角">⤢ 隐藏面板</button>
+    </div>
+  </div>
+  <p id="status-body">拖动左侧根数实时求解位置 / 高度 / 速度 / 飞行路径角 · ECI 惯性系（地球随仿真时间自转）
+     · μ = 398600.4418 km³/s² · R⊕ = 6378.137 km
+     · 摄动模式：J2–J4 + 大气阻力 + 太阳光压 数值积分（90 d 窗口）<span id="status-note"></span></p>
+</div>
+
+<div id="utc-clock" title="仿真时钟：近地点历元锚定真实 UTC，随播放按倍率推进。倍率 ×1（实时）时与实际 UTC 完全一致。">
+  <div class="utc-sim" id="utc-sim">—</div>
+  <div class="utc-real"><span id="utc-real">—</span><button id="btn-utc-sync" title="将仿真时钟重新对齐到当前实际 UTC（保持当前轨道相位）">⟳ 对齐到现在</button></div>
+</div>
+
+<div id="mini-ctrl" title="迷你控制条：面板隐藏时保留播放/暂停与进度条">
+  <button id="btn-play-mini">▶ 播放</button>
+  <!-- #ph-prog 进度条在隐藏面板时由 JS 移入此处，恢复面板时移回原位 -->
+</div>
+
+<div id="controls">
+  <h2>轨道根数（开普勒）</h2>
+  <div id="hint-cr3bp" class="hintbox">Halo / NRHO / DRO 为地月三体（CR3BP）三维周期轨道，开普勒六根数无法描述——下列滑块已停用；请在「月球预设轨道」中调整振幅 / 相位等参数。</div>
+  <div id="hint-l2" class="hintbox">L2 会合系视角：月心居中，视角随会合系同步旋转（拖动时暂停），地月连线在画面中保持固定。橙色闭环即鹊桥一号在此旋转系中的轨迹——它正沿该环绕 L2 周期转圈。浅蓝小点（含「地球」文字）是地球方位标识，真实地球远在视野之外，此点仅指示方位便于定位。</div>
+  <div id="hint-top" class="hintbox">俯视·地球居中视角：地球固定于画面中心（惯性系，不随会合系共转），月球沿浅蓝环绕地球公转，航天器绕月运行；绿色轨迹 = 航天器的地心惯性路径——即 CR3BP 轨道环绕地球的整体形状（仅三体模式绘制，二体 / 摄动月轨仍有地心居中与月球轨道环）。拖动旋转、滚轮缩放。</div>
+  <div class="el-row" data-key="a">
+    <div class="el-head"><span class="el-name">半长轴 <b>a</b></span>
+      <span class="el-val"><input type="number" step="any"><span class="unit">km</span></span></div>
+    <input type="range">
+  </div>
+  <div class="el-row" data-key="e">
+    <div class="el-head"><span class="el-name">偏心率 <b>e</b></span>
+      <span class="el-val"><input type="number" step="any"><span class="unit"></span></span></div>
+    <input type="range">
+  </div>
+  <div class="el-row" data-key="i">
+    <div class="el-head"><span class="el-name">倾角 <b>i</b></span>
+      <span class="el-val"><input type="number" step="any"><span class="unit">°</span></span></div>
+    <input type="range">
+  </div>
+  <div class="el-row" data-key="Om">
+    <div class="el-head"><span class="el-name">升交点赤经 <b>Ω</b></span>
+      <span class="el-val"><input type="number" step="any"><span class="unit">°</span></span></div>
+    <input type="range">
+  </div>
+  <div class="el-row" data-key="w">
+    <div class="el-head"><span class="el-name" id="el-name-w">近地点幅角 <b>ω</b></span>
+      <span class="el-val"><input type="number" step="any"><span class="unit">°</span></span></div>
+    <input type="range">
+  </div>
+  <div class="el-row" data-key="nu">
+    <div class="el-head"><span class="el-name">真近点角 <b>ν</b>（轨道相位）</span>
+      <span class="el-val"><input type="number" step="any"><span class="unit">°</span></span></div>
+    <input type="range">
+  </div>
+
+  <div id="derived">
+    <div class="dline"><span>周期 T</span><span id="d-T">—</span></div>
+    <div class="dline"><span id="d-hp-label">近地点高度 h<sub>p</sub></span><span id="d-hp">—</span></div>
+    <div class="dline"><span id="d-ha-label">远地点高度 h<sub>a</sub></span><span id="d-ha">—</span></div>
+    <div class="dline"><span>偏近点角 E</span><span id="d-E">—</span></div>
+    <div class="dline"><span>平近点角 M</span><span id="d-M">—</span></div>
+  </div>
+  <div id="warn-atmo" class="warnbox atmo">⚠ 近地点进入大气层（h<sub>p</sub> &lt; 120 km），轨道不持久</div>
+  <div id="warn-touch" class="warnbox touch">⚠ 近地点在地球内部（h<sub>p</sub> &lt; 0）——数学上合法，物理上已撞地</div>
+  <div id="warn-moon-touch" class="warnbox touch" style="display:none;">⚠ 近月点在月面以下（h<sub>p</sub> &lt; 0）——数学上合法，物理上已撞月</div>
+  <div id="hint-ecirc" class="hintbox">e ≈ 0：ω 与 Ω 不再独立可辨（近圆轨道退化），演示仍按公式计算。</div>
+
+  <h2>相位与播放</h2>
+  <div id="phase-box">
+    <div class="mono">n = <span id="ph-n">—</span> · T = <span id="ph-T">—</span></div>
+    <div class="mono" id="ph-chain">—</div>
+    <div class="mono" id="ph-t">—</div>
+    <div id="ph-hint" style="display:none; font-size:11px; color:var(--muted); margin-top:5px;">滑动以显示未来轨道位置</div>
+    <div id="ph-prog" style="display:none;">
+      <div class="prog-grad"></div>
+      <div class="prog-dim"></div>
+      <div class="prog-marker"></div>
+    </div>
+  </div>
+  <div class="btnrow">
+    <button class="ctl" id="btn-play">▶ 播放</button>
+    <select class="ctl" id="sel-speed" title="时间倍率：每秒真实时间推进的仿真时长">
+      <option value="86400">24 h/s</option>
+      <option value="43200">12 h/s</option>
+      <option value="21600">6 h/s</option>
+      <option value="10800">3 h/s</option>
+      <option value="7200">2 h/s</option>
+      <option value="3600">1 h/s</option>
+      <option value="1800">30 min/s</option>
+      <option value="600" selected>10 min/s</option>
+      <option value="300">5 min/s</option>
+      <option value="60">1 min/s</option>
+      <option value="1">实时 1 s/s</option>
+    </select>
+    <button class="ctl" id="btn-peri" title="相位回到 ν=0（过近地点）">⟲ 回近地点</button>
+    <button class="ctl" id="btn-fit" title="相机距离适配当前轨道">⤢ 适应视角</button>
+    <button class="ctl" id="btn-fpv" title="相机切至航天器第一视角：沿速度方向观察（拖拽转头，滚轮变焦）">🛰 第一视角</button>
+    <button class="ctl active" id="btn-ov" title="回到全局概览视角（自由拖拽 / 滚轮缩放）">🌐 全局视角</button>
+    <button class="ctl" id="btn-l2" title="L2 会合系（旋转坐标系）视角：地月连线固定，观察卫星绕 L2 转圈（仅三体模式可用）" disabled>⟳ L2 会合系</button>
+    <button class="ctl" id="btn-top" title="俯视·地球居中视角：从轨道面正上方俯视，地球固定在画面中心（惯性系），月球沿浅蓝环公转；绿色线 = 航天器地心惯性路径——CR3BP 轨迹环绕地球的运动全貌（全部月球轨道可用）" disabled>⊕ 俯视·地球居中</button>
+    <button class="ctl active" id="btn-labels" title="一键显示/隐藏全部文字标签（含 L1/L2 标记文字，等同左侧「文字标签」开关）">🏷 标签</button>
+  </div>
+
+  <h2>传播模型</h2>
+  <select class="ctl" id="sel-prop"></select>
+  <div class="prop-note" id="prop-note"></div>
+  <label class="chk-row" id="row-stationkeep" style="display:none;"
+    title="沿 Halo 参考轨道每 T/8（≈44 h）施加一次 STM 单脉冲（死拍控制），抑制 L2 本征指数不稳定漂移；不勾选时约 3–4 圈（≈1200 h）后漂离">
+    <input type="checkbox" id="chk-stationkeep">轨道修正（定轨保持，每 T/8 单脉冲）</label>
+
+  <h2 id="h-presets">预设轨道</h2>
+  <div class="presets" id="presets-earth">
+    <button class="ctl" data-preset="iss">ISS 国际空间站</button>
+    <button class="ctl" data-preset="css">天宫空间站</button>
+    <button class="ctl" data-preset="leo">LEO 400km</button>
+    <button class="ctl" data-preset="sso">SSO</button>
+    <button class="ctl" data-preset="molniya">闪电 Molniya</button>
+    <button class="ctl" data-preset="geo">GEO</button>
+    <button class="ctl" data-preset="bds">北斗 MEO</button>
+    <button class="ctl" data-preset="tli">TLI 大椭圆</button>
+  </div>
+
+  <h2 id="h-moon-presets" style="display:none;">月球预设轨道</h2>
+  <div class="moon-preset" id="presets-moon" style="display:none;">
+    <button class="ctl" data-mpreset="clo">环月圆轨道 CLO（12 h）</button>
+    <button class="ctl" data-mpreset="ell">环月椭圆轨道（15×200 km）</button>
+    <button class="ctl" data-mpreset="elfo">鹊桥二号 ELFO（24 h 冻结）</button>
+    <button class="ctl" data-mpreset="halo">鹊桥一号 Halo（L2 南族 Az=13000 km）</button>
+    <button class="ctl" data-mpreset="nrho">NRHO 9:2（Gateway 类）</button>
+    <button class="ctl" data-mpreset="dro">DRO 共振轨道（2:1 / 3:1）</button>
+    <div class="mp-desc" id="mp-desc">—</div>
+    <div class="mp-params" id="mp-params"></div>
+    <div class="mp-frozen" id="mp-frozen" style="display:none;"></div>
+  </div>
+
+  <h2>显示选项</h2>
+  <label class="chk-row"><input type="checkbox" id="chk-vel" checked>速度矢量 v（黄）与地心矢量 r（灰）</label>
+  <label class="chk-row" id="row-forces" style="display:none;"
+    title="CR3BP 三体模式专属：实时显示航天器所受月球引力（白）、地球引力（蓝）与合力（红）三个箭头。方向严格真实；力的大小动态范围跨轨道达数百倍，长度按当帧最大力归一并取平方根压缩，仅用于比较同一时刻三力的相对大小">
+    <input type="checkbox" id="chk-forces" checked>受力分析 F☾（白）/ F⊕（蓝）/ F合（红）</label>
+  <div id="row-top-trails" style="display:none;"
+    title="仅「俯视·地球居中」+ 三体模式可用：蓝线 = 航天器相对月球（月心惯性系）的轨迹，随月球锚定在画面中；绿线 = 航天器相对地球（地心惯性系）的轨迹，锚定在画面中心的地球上">
+    <label class="chk-row"><input type="checkbox" id="chk-trail-moon" checked>显示相对月球轨迹（蓝线）</label>
+    <label class="chk-row"><input type="checkbox" id="chk-trail-earth" checked>显示相对地球轨迹（绿线）</label>
+  </div>
+  <label class="chk-row"><input type="checkbox" id="chk-disc" checked>当地水平面圆盘（⊥ r）</label>
+  <label class="chk-row"><input type="checkbox" id="chk-node" checked>升交点节线（☊ 紫虚线）</label>
+  <label class="chk-row"><input type="checkbox" id="chk-grid" checked>赤道面网格与坐标轴</label>
+  <label class="chk-row"><input type="checkbox" id="chk-labels" checked>文字标签</label>
+
+  <h2>高级参数</h2>
+  <div class="param-row"><label>C_D 阻力系数</label><input type="number" id="pp-cd" value="2.2" step="0.1" min="1" max="3"></div>
+  <div class="param-row"><label>C_R 光压系数 (1+η)</label><input type="number" id="pp-cr" value="1.5" step="0.1" min="1" max="2"></div>
+  <div class="param-row"><label>S/m 面质比 (m²/kg)</label><input type="number" id="pp-sm" value="0.02" step="0.005" min="0.001" max="1"></div>
+  <div class="param-row"><label>λ₀ 历元太阳黄经 (°)</label><input type="number" id="pp-lam" value="0" step="15" min="0" max="360"></div>
+  <div class="prop-note">摄动力假设参数 · 仅在数值摄动模式下生效；切至摄动模型即按此值积分。</div>
+
+  <div id="pert-ctl" style="display:none;">
+    <h2>摄动力开关</h2>
+    <label class="chk-row"><input type="checkbox" id="pp-grav" checked>地球非球形引力（J2–J4）</label>
+    <label class="chk-row"><input type="checkbox" id="pp-drag" checked>大气阻力</label>
+    <label class="chk-row"><input type="checkbox" id="pp-srp" checked>太阳光压</label>
+    <label class="chk-row"><input type="checkbox" id="pp-moon3b">月球第三体引力</label>
+    <div class="prop-note">
+      传播窗口 90 d · 地球非球形 J2–J4 · 大气阻力 · 太阳光压 · 月球三体（历元 2026-10-13 SPICE 星历锁定）<br>
+      ✓ TLE 验证（ISS/CSS 30 d 真实数据）：Ω 节点回归 模型 −4.98°/d vs 实测 −4.95°/d（误差 &lt;1%）<br>
+      <span class="pert-busy" id="pert-busy"></span>
+    </div>
+  </div>
+  <div id="pert-ctl-moon" style="display:none;">
+    <h2>月心摄动力开关</h2>
+    <label class="chk-row"><input type="checkbox" id="mp-grav" checked>月球非球形引力（J2–J4，GL0660B）</label>
+    <label class="chk-row"><input type="checkbox" id="mp-earth3b" checked>地球第三体（直接项+间接项）</label>
+    <label class="chk-row"><input type="checkbox" id="mp-srp" checked>太阳光压（圆柱月影）</label>
+    <div class="prop-note">
+      传播窗口 90 d · 月球引力场 GL0660B（GRAIL 实测）· 地球三体（历元 2026-10-13 SPICE 星历锁定）· 太阳光压 · 无大气<br>
+      <span class="pert-busy" id="pert-busy-moon"></span>
+    </div>
+  </div>
+  <div class="prop-note" id="prop-note-kepler" style="display:none;">摄动接口已预留：实现 Propagator 契约（见 elements_core.js 注释）后调用
+    ElementsCore.registerPropagator() 即可在此下拉框接入，页面与场景零改动。当前为纯开普勒二体。</div>
+</div>
+
+<div id="outputs">
+  <div class="card" id="card-pos">
+    <div class="card-head"><span class="title">位置 r<sub>ECI</sub></span><button data-deriv="pos">推导 ∨</button></div>
+    <div class="big" id="pos-val">—</div>
+    <div class="sub" id="pos-sub">—</div>
+    <div class="deriv" id="pos-deriv"></div>
+  </div>
+  <div class="card" id="card-alt">
+    <div class="card-head"><span class="title">高度 h（球体近似）</span><button data-deriv="alt">推导 ∨</button></div>
+    <div class="big" id="alt-val">—</div>
+    <div class="sub" id="alt-sub">—</div>
+    <div class="sub" id="alt-model-hint" style="display:none;"></div>
+    <div class="deriv" id="alt-deriv"></div>
+  </div>
+  <div class="card" id="card-vel">
+    <div class="card-head"><span class="title">速度 v</span><button data-deriv="vel">推导 ∨</button></div>
+    <div class="big" id="vel-val">—</div>
+    <div class="sub" id="vel-sub">—</div>
+    <div class="deriv" id="vel-deriv"></div>
+  </div>
+  <div class="card" id="card-gam">
+    <div class="card-head"><span class="title">飞行路径角 γ（速度与当地水平面夹角）</span><button data-deriv="gam">推导 ∨</button></div>
+    <div class="big" id="gam-val">—</div>
+    <div class="sub" id="gam-sub">—</div>
+    <div class="deriv" id="gam-deriv"></div>
+  </div>
+  <div class="card" id="card-fz" style="display:none;">
+    <div class="card-head"><span class="title">带谐引力摄动 a<sub>J2–J4</sub></span><button data-deriv="fz">推导 ∨</button></div>
+    <div class="big" id="fz-val">—</div>
+    <div class="sub" id="fz-sub">—</div>
+    <div class="deriv" id="fz-deriv"></div>
+  </div>
+  <div class="card" id="card-fd" style="display:none;">
+    <div class="card-head"><span class="title">大气阻力摄动 a<sub>drag</sub></span><button data-deriv="fd">推导 ∨</button></div>
+    <div class="big" id="fd-val">—</div>
+    <div class="sub" id="fd-sub">—</div>
+    <div class="deriv" id="fd-deriv"></div>
+  </div>
+  <div class="card" id="card-fs" style="display:none;">
+    <div class="card-head"><span class="title">太阳光压摄动 a<sub>SRP</sub></span><button data-deriv="fs">推导 ∨</button></div>
+    <div class="big" id="fs-val">—</div>
+    <div class="sub" id="fs-sub">—</div>
+    <div class="deriv" id="fs-deriv"></div>
+  </div>
+  <div class="card" id="card-cr3bp" style="display:none;">
+    <div class="card-head"><span class="title">三体会合系状态（CR3BP）</span><button data-deriv="cj">推导 ∨</button></div>
+    <div class="big" id="cj-val">—</div>
+    <div class="sub" id="cj-sub">—</div>
+    <div class="deriv" id="cj-deriv"></div>
+  </div>
+  <div class="card" id="card-mission" style="display:none;">
+    <div class="card-head"><span class="title">使命轨道参数</span></div>
+    <div class="sub" id="mission-sub">—</div>
+  </div>
+  <div class="card" id="card-evol" style="display:none;">
+    <div class="card-head"><span class="title">90 d 密切根数演化</span></div>
+    <div class="sub" id="evol-sub">—</div>
+    <div class="chart-wrap"><div class="chart-lbl">半长轴 <b>a</b> (km)</div><canvas class="chart" id="cv-a"></canvas></div>
+    <div class="chart-wrap"><div class="chart-lbl">偏心率 <b>e</b></div><canvas class="chart" id="cv-e"></canvas></div>
+    <div class="chart-wrap"><div class="chart-lbl">倾角 <b>i</b> (°)</div><canvas class="chart" id="cv-i"></canvas></div>
+    <div class="chart-wrap"><div class="chart-lbl">升交点赤经 <b>Ω</b> (°)</div><canvas class="chart" id="cv-om"></canvas></div>
+    <table id="osc-table">
+      <tr><th></th><th>a (km)</th><th>e</th><th>i (°)</th><th>Ω (°)</th><th>ω (°)</th></tr>
+      <tr><td>t₀</td><td id="osc-a0">—</td><td id="osc-e0">—</td><td id="osc-i0">—</td><td id="osc-om0">—</td><td id="osc-w0">—</td></tr>
+      <tr><td id="osc-now-lbl">现在</td><td id="osc-anow">—</td><td id="osc-enow">—</td><td id="osc-inow">—</td><td id="osc-omnow">—</td><td id="osc-wnow">—</td></tr>
+      <tr><td>t₀+90d</td><td id="osc-aend">—</td><td id="osc-eend">—</td><td id="osc-iend">—</td><td id="osc-omend">—</td><td id="osc-wend">—</td></tr>
+    </table>
+    <div id="force-line">—</div>
+  </div>
+  <div class="card" id="sym-legend">
+    <div class="card-head"><span class="title">符号速查（上方推导通用）</span>
+      <button id="sym-toggle">收起 ∧</button></div>
+    <div class="sym-body">
+      <div class="sym-cap">轨道根数与状态量</div>
+      <div class="sym-row"><span class="sym">a · e · i</span><span class="desc">半长轴 · 偏心率 · 倾角</span></div>
+      <div class="sym-row"><span class="sym">Ω · ω</span><span class="desc">升交点赤经 · 近地点幅角（月球：近月点幅角）</span></div>
+      <div class="sym-row"><span class="sym">ν · E · M</span><span class="desc">真近点角 · 偏近点角 · 平近点角（ν = 0° 为近地点/近月点）</span></div>
+      <div class="sym-row"><span class="sym">p = a(1−e²)</span><span class="desc">半通径</span></div>
+      <div class="sym-row"><span class="sym">r · v · r̂</span><span class="desc">地/月心距 · 速度 · 位置单位矢量</span></div>
+      <div class="sym-row"><span class="sym">γ</span><span class="desc">飞行路径角（速度与当地水平面夹角）</span></div>
+      <div class="sym-row"><span class="sym">PQW → ECI</span><span class="desc">近焦点系分量经旋转矩阵 R = R₃(−Ω)·R₁(−i)·R₃(−ω) 转至惯性系</span></div>
+      <div class="sym-cap">天体常数（月球选项卡自动换用月心值 R☾ / μ☾）</div>
+      <div class="sym-row"><span class="sym">μ⊕</span><span class="desc">地球引力常数 398600.4418 km³/s²（月球 μ☾ = 4902.800）</span></div>
+      <div class="sym-row"><span class="sym">R⊕</span><span class="desc">地球半径 6378.137 km，球体近似（月球 R☾ = 1737.4）</span></div>
+      <div class="sym-row"><span class="sym">ω⊕</span><span class="desc">地球自转角速率 7.2921×10⁻⁵ rad/s（v<sub>rel</sub> = v − ω⊕×r）</span></div>
+      <div class="sym-cap">摄动力推导（数值摄动模式）</div>
+      <div class="sym-row"><span class="sym">J₂–J₄ · Pₙ</span><span class="desc">带谐引力系数 · Legendre 多项式（φ 地心纬度，sinφ = z/r）</span></div>
+      <div class="sym-row"><span class="sym">ρ(h)</span><span class="desc">大气密度（h 为高度，分段指数模型）</span></div>
+      <div class="sym-row"><span class="sym">C<sub>D</sub> · C<sub>R</sub> · S/m</span><span class="desc">阻力系数 · 光压系数 · 面质比（见「高级参数」）</span></div>
+      <div class="sym-row"><span class="sym">ŝ · p⊙ · λ₀</span><span class="desc">太阳方向单位矢量 · 太阳光压常数 · 历元太阳黄经</span></div>
+      <div class="sym-row"><span class="sym">受晒系数 ν</span><span class="desc">地影因子 0（本影）→ 1（受晒）；记号与真近点角 ν 无关</span></div>
+      <div class="sym-cap">CR3BP（月球 Halo / NRHO 预设）</div>
+      <div class="sym-row"><span class="sym">μ</span><span class="desc">质量比 m☾/(m⊕+m☾) ≈ 0.01215，无量纲（区别于引力常数 μ⊕）</span></div>
+      <div class="sym-row"><span class="sym">l = a<sub>EM</sub></span><span class="desc">特征长度（地月平均距离），会合系坐标以 l 归一</span></div>
+      <div class="sym-row"><span class="sym">Ω · C</span><span class="desc">旋转系有效势 · 雅可比常数 C = 2Ω − v²（此 Ω ≠ 升交点赤经）</span></div>
+      <div class="sym-row"><span class="sym">r₁ · r₂ · L1–L3</span><span class="desc">至地球 / 月球距离 · 共线平动点</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="selftest">自检运行中…</div>
+<div id="selftest-detail"></div>
+
+<script src="static/vendor/three.min.js"></script>
+<script src="static/vendor/fatline.js"></script>
+<script src="static/elements_core.js"></script>
+<script src="static/elements_perturb.js"></script>
+<script src="static/elements_cr3bp.js"></script>
+<script src="static/elements_selftest.js"></script>
+<script src="static/elements_demo.js"></script>
+</body>
+</html>

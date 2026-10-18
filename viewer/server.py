@@ -2,10 +2,12 @@
 """交互式地平线掩码可视化工具 — Flask 后端。
 
 端点一览：
-- ``GET /``                         → 站点首页（三入口导航）
+- ``GET /``                         → 站点首页（四入口导航）
 - ``GET /visibility``               → 地平线掩码可视化前端（原 ``/``）
 - ``GET /orbits``                   → 杨维廉论文轨道 3D 可视化前端
 - ``GET /coast_tool/``              → 月球发射窗口计算器（停泊轨道滑行方案）
+- ``GET /elements_demo``            → 轨道六根数交互演示（二体/摄动/CR3BP）
+- ``GET /assets/<path>``            → elements_demo 贴图资产（仓库根 assets/）
 - ``GET /api/dem_tile``             → DEM 瓦片 PNG（20 km × 20 km 裁剪，附元数据头）
 - ``GET /api/horizon_mask``         → 360° 地形遮挡角数组（lru_cache 缓存）
 - ``GET /api/earth_elevation``      → 单时刻地球高度角 + 方位角
@@ -106,6 +108,8 @@ DEFAULT_DATE = "2026-08-15"
 #   预生成；不在请求内实时求解，避免单线程服务被 ~20 s 慢计算拖垮。
 #   存放于 viewer/data/ 而非 static/，强制经 API 读取，保持单一入口）
 COAST_TOOL_DIR = os.path.join(_REPO_ROOT, "coast_tool")
+# elements_demo 贴图（earth_day/earth_night/moon_surface），页内以 ../../assets/ 引用
+ASSETS_DIR = os.path.join(_REPO_ROOT, "assets")
 YANG_ORBITS_JSON = os.path.join(BASE_DIR, "data", "yang_orbits_xyz.json")
 YANG_ORBITS_DEFAULT_T_ARRIVE = "2026-08-24T00:00:00Z"
 
@@ -1448,7 +1452,7 @@ def fusion_cancel_job(job_id: str):
 # ---------------------------------------------------------------------------
 @app.route("/")
 def landing() -> str:
-    """站点首页：三个功能区入口（可见性 / 轨道可视化 / 发射窗口）。"""
+    """站点首页：四个功能区入口（可见性 / 轨道可视化 / 发射窗口 / 轨道演示）。"""
     return render_template("landing.html")
 
 
@@ -1460,6 +1464,22 @@ def index() -> str:
 @app.route("/orbits")
 def orbits_page() -> str:
     return render_template("orbits.html")
+
+
+@app.route("/elements_demo")
+def elements_demo_page():
+    """轨道六根数交互演示（开普勒二体 + 数值摄动 + CR3BP，纯前端计算）。
+
+    内联脚本已外置到 static/elements_demo.js 以符合 CSP（script-src 'self'）；
+    页内相对路径 static/... 落到 Flask 全局 static，贴图经 /assets/<path> 提供。
+    """
+    return send_file(os.path.join(BASE_DIR, "elements_demo.html"))
+
+
+@app.route("/assets/<path:filename>")
+def elements_demo_asset(filename: str):
+    """elements_demo 贴图资产（send_from_directory 自带路径穿越防护）。"""
+    return send_from_directory(ASSETS_DIR, filename)
 
 
 # ---------------------------------------------------------------------------

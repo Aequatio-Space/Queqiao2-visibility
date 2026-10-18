@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="鹊桥二号可见性 · 地月转移轨道可视化 · 月球发射窗口计算器 — 三合一交互式航天可视化站点">
+<meta name="description" content="鹊桥二号可见性 · 地月转移轨道可视化 · 月球发射窗口计算器 · 轨道六根数交互演示 — 四合一交互式航天可视化站点">
 <title>月球探测可视化站 · 首页</title>
 <style>
     :root {
@@ -15,6 +15,7 @@
         --accent: #4aa8e0;
         --accent-2: #5fbf85;
         --accent-3: #d9a441;
+        --accent-4: #b07fd8;
     }
 
     * { box-sizing: border-box; }
@@ -190,7 +191,8 @@
     <p>
         面向鹊桥二号中继任务与地月转移轨道设计的交互式可视化平台：
         从月球南极的地平线可见性分析，到杨维廉论文转移轨道的三维展示，
-        再到经嫦娥五号/六号与鹊桥二号实测数据验证的发射窗口计算器。
+        再到经嫦娥五号/六号与鹊桥二号实测数据验证的发射窗口计算器，
+        以及开普勒二体/摄动/三体的轨道六根数交互演示。
         全部计算与渲染均在浏览器端或本站服务端完成，无第三方 CDN 依赖。
     </p>
 </header>
@@ -247,6 +249,24 @@
                 <span class="tag">落区走廊</span>
                 <span class="tag">月球引力修正</span>
                 <span class="tag">任务验证</span>
+            </div>
+            <div class="go">进入功能区 <span class="arrow">→</span></div>
+        </a>
+
+        <a class="card" href="/elements_demo" data-track="首页-轨道演示"
+           style="--card-accent: var(--accent-4);">
+            <div class="idx">04 / ELEMENTS</div>
+            <h2>轨道六根数交互演示</h2>
+            <p>
+                开普勒二体六根数交互推演，J2–J4 带谐引力、大气阻力与太阳光压
+                数值摄动下的 90 天密切根数演化，以及地月 CR3BP 三体轨道
+                （Halo / NRHO）三维演示，内置 poliastro 基准自检对拍。
+            </p>
+            <div class="tags">
+                <span class="tag">开普勒二体</span>
+                <span class="tag">数值摄动</span>
+                <span class="tag">CR3BP 三体</span>
+                <span class="tag">基准自检</span>
             </div>
             <div class="go">进入功能区 <span class="arrow">→</span></div>
         </a>
