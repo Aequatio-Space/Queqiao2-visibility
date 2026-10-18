@@ -1,12 +1,13 @@
 # Queqiao2-visibility — 月球探测可视化站
 
-基于 Flask 的交互式月球探测可视化站点，首页提供三个功能区入口：
+基于 Flask 的交互式月球探测可视化站点，首页提供四个功能区入口：
 
 | 功能区 | 路径 | 内容 |
 | --- | --- | --- |
 | **轨道可见性分析** | `/visibility` | 月球南极极射投影 DEM 光照地形图（实时太阳光照渲染）、极坐标地平线图 / 第一人称 3D 天空视角，底部时间滑块联动展示地球与鹊桥二号（Queqiao-2）中继卫星的全天可见性窗口 |
 | **地月转移轨道可视化** | `/orbits` | 杨维廉论文 24 条地月转移轨道（表 1–4）在冻结 MEP 坐标系中的 three.js 三维展示：三栏工作台、搜索过滤与族谱分组、**任务时间轴动画**（航天器沿采样轨迹推进、月球沿真实轨迹移动）、**C3 柱状图**（点击选择）、聚焦选中、相机聚焦与视角预设；地球采用 NASA Blue Marble 昼夜贴图（复用 `coast_tool/assets/` 素材）（`launch_window` 引擎离线求解，SSE 推送） |
 | **月球发射窗口计算器** | `/coast_tool/` | 停泊轨道滑行方案（固定射向走廊 → ~200 km 停泊 → 滑行相位闭合 → TLI 入 LTO），四体引力修正支持**任意目标环月倾角 i_M ∈ [0°,180°]**；内置 **CZ-5/CZ-8 火箭能力核对**与**嫦娥五号/鹊桥二号/嫦娥六号三个验证案例**（展示滑行偏长等已知误差）；右侧另附**可选的融合反向求解**（高精度 L6 家族表反解，须确认后运行） |
+| **轨道六根数交互演示** | `/elements_demo` | 开普勒二体六根数（a/e/i/Ω/ω/ν）滑块实时求解位置 / 高度 / 速度 / 飞行路径角（公式推导逐步展开）；地球 / 月球双选项卡：地心含 **J2–J4 + 大气阻力 + 太阳光压 + 月球三体**数值摄动（90 d 密切根数演化图，TLE 验证 Ω 节点回归误差 <1%），月心含 **GL0660B 引力场 + 地球三体 + 光压**摄动；地月 **CR3BP 三体**轨道（鹊桥一号 Halo / NRHO 9:2 / DRO / 鹊桥二号 ELFO 等预设，STM 定轨保持，L2 会合系与俯视地球居中视角）；UTC 仿真时钟多倍率播放；**poliastro 基准页内自检对拍**，纯前端计算（无服务端 API） |
 
 数据由服务端计算（SPICE 天历 + 月球 DEM），前端全部基于 Canvas/WebGL
 客户端渲染。DEM 使用仓库内置的**压缩子集** `ldem_87s_5mpp_shackleton_50km_25m.tif`
@@ -23,14 +24,20 @@ viewer/                     # Flask 应用
   server.py                 # 后端（生产 WSGI 入口：viewer.server:app）
   templates/                # 页面：landing.html（首页）/ index.html（可见性）
                             #       orbits.html（轨道 3D）/ coast_tool 在仓库根
+  elements_demo.html        # 轨道六根数交互演示页面（二体/摄动/CR3BP，独立 send_file）
   static/app.js             # 可见性前端逻辑
   static/orbits.js          # 轨道 3D 前端逻辑
   static/landing.js         # 首页访问统计
-  static/vendor/            # three.js / GLTFLoader（本地 vendored）
+  static/elements_*.js      # 演示前端：core（开普勒二体数学）/ perturb（数值摄动）
+                            #       / cr3bp（三体轨道）/ selftest（poliastro 基准对拍）
+                            #       / demo（页面与 three.js 场景）
+  static/vendor/            # three.js / GLTFLoader / fatline（本地 vendored）
   data/yang_orbits_xyz.json # Yang 论文 24 条轨道 XYZ 资产（预生成，随仓库分发）
   data/fusion_tables/       # 融合反解 L5 家族表（T=112.0–113.0 h，预生成）
   jobs/                     # 融合反解作业产物（运行时生成，git-ignored）
   stats/                    # 访问统计 CSV（运行时生成，git-ignored）
+assets/                     # elements_demo 贴图（earth_day / earth_night / moon_surface，
+                            #       /assets/<path> 精确白名单 + 一周长缓存）
 launch_window/              # 移植的轨道/窗口引擎（离线轨道资产 + 融合反解）
 coast_tool/                 # 月球发射窗口计算器（静态子应用，three.js vendored）
 scripts/build_yang_orbits.py# 重新生成 viewer/data/yang_orbits_xyz.json
@@ -45,10 +52,13 @@ requirements.txt            # Python 依赖
 ```
 
 功能亮点：
-- 首页三入口导航（可见性 / 轨道可视化 / 发射窗口），站点内互相跳转；
+- 首页四入口导航（可见性 / 轨道可视化 / 发射窗口 / 轨道演示），站点内互相跳转；
 - 左侧月球光照地形图（实时太阳光照渲染）、右侧极坐标地平线图 / 第一人称 3D 天空视角；
 - 底部时间滑块联动地球与鹊桥二号全天可见性窗口；
 - 杨维廉论文 24 条转移轨道 3D 可视化（共面 / 非共面 / 同向 / 极月四族）；
+- 轨道六根数交互演示：开普勒二体 + J2–J4/大气阻力/太阳光压数值摄动（90 d 密切根数演化）
+  + 地月 CR3BP 三体轨道（Halo / NRHO / DRO），ISS / 天宫 / 鹊桥一号 / 鹊桥二号等预设，
+  poliastro 基准页内自检，纯前端计算；
 - **访问统计**：页面访问 + 按钮点击按 IP/日期落盘 CSV，前端 📊 统计面板查看。
 
 ## 本地运行
@@ -66,10 +76,11 @@ python viewer/server.py
 DEM_PATH=/path/to/ldem_87s_5mpp.tif PORT=5050 python viewer/server.py
 
 # 3. 浏览器打开
-#    http://127.0.0.1:5050            （首页：三入口导航）
+#    http://127.0.0.1:5050            （首页：四入口导航）
 #    http://127.0.0.1:5050/visibility （轨道可见性）
 #    http://127.0.0.1:5050/orbits     （轨道 3D 可视化）
 #    http://127.0.0.1:5050/coast_tool/（发射窗口计算器）
+#    http://127.0.0.1:5050/elements_demo（轨道六根数交互演示）
 ```
 
 轨道 3D 页面读取仓库内置资产 `viewer/data/yang_orbits_xyz.json`（随仓库分发，
@@ -121,7 +132,7 @@ waitress-serve --host 0.0.0.0 --port $PORT viewer.server:app
 
 ## 安全测试
 
-`scripts/security_smoke_test.sh` 对主页与三个功能区及全部 API 做 12 组 88 项
+`scripts/security_smoke_test.sh` 对主页与四个功能区及全部 API 做 12 组 88 项
 安全检查（安全头/CSP/无内联脚本、输入校验矩阵、方法限制、路径穿越、CSRF、
 CSV 注入、IP 伪造、限流、信息泄露、严格 JSON、CORS、融合反解作业）：
 
@@ -176,7 +187,7 @@ DEM 使用仓库内置的压缩子集（52 MB，随仓库分发），**无需持
 
 DEM 使用仓库内置的压缩子集（52 MB，随仓库分发），**无需持久盘**，
 所有端点（含 DEM 类：地形瓦片、地平线掩码、3D 地形）均可直接工作。
-`vercel.json` 将全部路径转发至 Flask（`api/index.py`），三个功能区与静态
+`vercel.json` 将全部路径转发至 Flask（`api/index.py`），四个功能区与静态
 子应用均可用；轨道 JSON 为预生成资产，Serverless 内不做重计算。
 
 ```bash
@@ -194,10 +205,12 @@ vercel --prod
 
 | 端点 | 说明 |
 | --- | --- |
-| `GET /` | 站点首页（三入口导航） |
+| `GET /` | 站点首页（四入口导航） |
 | `GET /visibility` | 可见性可视化前端页面 |
 | `GET /orbits` | 轨道 3D 可视化前端页面 |
 | `GET /coast_tool/` | 发射窗口计算器前端页面（静态子应用） |
+| `GET /elements_demo` | 轨道六根数交互演示前端页面（二体 / 数值摄动 / CR3BP，纯前端计算） |
+| `GET /assets/<path>` | elements_demo 贴图（3 张精确文件名白名单，一周长缓存） |
 | `GET /coast_tool/api/fusion/config` | 融合反解可用配置（支持的 T / 站点 / 规模） |
 | `POST /coast_tool/api/fusion/jobs` | 启动作业（须 `confirm=true`；长耗时，返回 202 + job_id） |
 | `GET /coast_tool/api/fusion/jobs/<id>` | 作业状态 / 结果（窗口列表 + 拒绝统计） |
@@ -232,6 +245,13 @@ vercel --prod
   经嫦娥五号/六号、鹊桥二号实测数据反演验证；四体引力修正支持任意目标
   环月倾角 i_M（含逆行）；算法、火箭能力口径与三个验证案例（含滑行偏长
   等已知误差）详见 `coast_tool/README.md`。
+- 轨道演示（`/elements_demo`）：开普勒二体为解析解，与 poliastro 0.17
+  `Orbit.from_classical` 基准逐公式对拍（页内加载即自检）；数值摄动为 Cowell
+  法 RK4——地心 J2–J4 + 大气阻力（分段指数密度）+ 太阳光压（地影因子）+ 月球
+  三体，月心 GL0660B（GRAIL 实测引力场）+ 地球三体（直接/间接项）+ 光压
+  （圆柱月影），90 d 窗口，历元 2026-10-13 SPICE 星历锁定；经 ISS/CSS 30 d
+  真实 TLE 验证（Ω 节点回归 −4.98°/d vs 实测 −4.95°/d，误差 <1%）；CR3BP
+  含 Halo / NRHO / DRO 周期轨道（微分修正初值）与 STM 单脉冲定轨保持。
 
 ## License 说明与许可分界
 
